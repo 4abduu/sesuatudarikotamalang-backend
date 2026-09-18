@@ -1,0 +1,384 @@
+// ============================================================================
+// SCHEMA PRISMA — Sesuatu DariKota Malang (Backend Express.js)
+// ============================================================================
+// Provider: MySQL (disesuaikan supaya bisa pakai Laragon yang sudah familiar)
+// Ganti DATABASE_URL di .env, contoh:
+//   DATABASE_URL="mysql://root:@localhost:3306/sesuatu_darikota_malang"
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ----------------------------------------------------------------------------
+// ENUMS
+// ----------------------------------------------------------------------------
+
+enum Role {
+  buyer
+  creator
+  admin
+}
+
+enum ArtisanStatus {
+  aktif
+  nonaktif
+}
+
+enum ApplicationStatus {
+  pending
+  diterima
+  ditolak
+}
+
+enum PaymentMethod {
+  midtrans
+  cod // Cash/QRIS di toko
+}
+
+// Status pesanan. "lewat_batas_pengambilan" dan "kedaluwarsa" idealnya
+// dihitung ulang (computed) berdasarkan timestamp (pickupDeadline / holdExpiresAt)
+// tiap kali data dibaca atau lewat scheduled job (cron), BUKAN cuma disimpan
+// sekali lalu dianggap final — supaya statusnya selalu akurat terhadap waktu
+// sekarang tanpa harus menunggu proses manual.
+enum OrderStatus {
+  menunggu_bayar
+  lunas
+  selesai
+  dibatalkan
+  kedaluwarsa // khusus alur Cash/QRIS yang hold-nya habis tanpa aksi
+  lewat_batas_pengambilan // khusus alur Midtrans yang lewat pickupDeadline
+}
+
+enum OtpPurpose {
+  ganti_email
+  lupa_password
+}
+
+enum ReviewStatus {
+  tampil
+  disembunyikan
+}
+
+enum NotificationType {
+  pengajuan_diterima
+  pengajuan_ditolak
+  ulasan_baru
+  pesanan_update
+  umum
+}
+
+// ----------------------------------------------------------------------------
+// USER & AUTH (satu tabel untuk buyer, creator, admin — dibedakan lewat role)
+// ----------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(buyer)
+  avatarUrl    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relasi 1-1 ke profil kreator (hanya terisi kalau role = creator)
+  artisan Artisan?
+
+  applications ArtisanApplication[]
+  orders       Order[]
+  reviews      Review[]
+  notifications Notification[]
+  otpCodes     OtpCode[]
+
+  @@map("users")
+}
+
+// Kode OTP untuk verifikasi ganti email & reset password lupa password.
+// Di produksi beneran dikirim ke email (sudah pernah berhasil diimplementasikan
+// sebelumnya), bukan disimulasikan seperti di prototype frontend-only.
+model OtpCode {
+  id          String     @id @default(cuid())
+  userId      String
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  code        String
+  purpose     OtpPurpose
+  targetEmail String? // dipakai khusus untuk purpose = ganti_email
+  expiresAt   DateTime
+  isUsed      Boolean    @default(false)
+  createdAt   DateTime   @default(now())
+
+  @@index([userId, purpose])
+  @@map("otp_codes")
+}
+
+// ----------------------------------------------------------------------------
+// KREATOR & KONSINYASI
+// ----------------------------------------------------------------------------
+
+model Artisan {
+  id        String        @id @default(cuid())
+  userId    String?       @unique
+  user      User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  brandName String
+  bio       String?       @db.Text
+  avatarUrl String?
+  status    ArtisanStatus @default(aktif)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  products Product[]
+
+  @@map("artisans")
+}
+
+model ArtisanApplication {
+  id             String            @id @default(cuid())
+  userId         String
+  user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  applicantName  String
+  contact        String // nomor WA
+  brandName      String
+  categoryId     String?
+  category       Category?         @relation(fields: [categoryId], references: [id])
+  description    String            @db.Text
+  sampleFileUrl  String?
+  status         ApplicationStatus @default(pending)
+  rejectReason   String?           @db.Text
+  submittedAt    DateTime          @default(now())
+  decidedAt      DateTime?
+
+  @@index([status])
+  @@map("artisan_applications")
+}
+
+// ----------------------------------------------------------------------------
+// KATALOG PRODUK
+// ----------------------------------------------------------------------------
+
+model Category {
+  id   String @id @default(cuid())
+  name String @unique
+  slug String @unique
+
+  products     Product[]
+  applications ArtisanApplication[]
+
+  @@map("categories")
+}
+
+model Product {
+  id               String   @id @default(cuid())
+  artisanId        String
+  artisan          Artisan  @relation(fields: [artisanId], references: [id], onDelete: Cascade)
+  categoryId       String
+  category         Category @relation(fields: [categoryId], references: [id])
+  name             String
+  slug             String   @unique
+  shortDescription String?
+  description      String   @db.Text
+  price            Int // dalam Rupiah, tanpa desimal
+  images           Json // array of string URL
+  isLimited        Boolean  @default(false)
+  isActive         Boolean  @default(true) // admin bisa nonaktifkan produk (mis. 6 bulan tidak laku) tanpa menghapusnya — riwayat order/review yang sudah ada tetap utuh
+  soldCount        Int      @default(0)
+  viewCount        Int      @default(0)
+  // Catatan: field ini disediakan untuk kemungkinan produk yang juga
+  // dijual di Shopee/Tokopedia. Berdasarkan konfirmasi narasumber, produk
+  // yang dijual di e-commerce SAAT INI adalah barang milik toko sendiri
+  // (bukan barang konsinyasi kreator), jadi field ini kemungkinan besar
+  // kosong untuk semua produk konsinyasi — tapi tetap disediakan (nullable)
+  // untuk fleksibilitas kalau kebijakan itu berubah di kemudian hari.
+  shopeeUrl        String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  variantOptions ProductVariantOption[]
+  variants       ProductVariant[]
+  story          ProductStory?
+  reviews        Review[]
+  orderItems     OrderItem[]
+
+  @@index([artisanId])
+  @@index([categoryId])
+  @@map("products")
+}
+
+// Definisi sumbu varian (mis. "Motif" dengan nilai ["Ubin","Sulur"]).
+// Nama & nilai bebas diisi admin/kreator (dinamis, bukan daftar tetap).
+model ProductVariantOption {
+  id        String @id @default(cuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  name      String // contoh: "Motif", "Ukuran"
+  values    Json // array of string, contoh: ["Ubin", "Sulur"]
+  sortOrder Int    @default(0)
+
+  @@index([productId])
+  @@map("product_variant_options")
+}
+
+// Kombinasi final hasil cartesian product dari semua ProductVariantOption,
+// masing-masing punya stok sendiri. Kalau produk tidak punya varian sama
+// sekali, tetap dibuatkan SATU baris di sini dengan combination = [] untuk
+// merepresentasikan stok tunggal produk itu (memudahkan query stok yang
+// konsisten baik produk bervarian maupun tidak).
+model ProductVariant {
+  id          String @id @default(cuid())
+  productId   String
+  product     Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  combination Json // array of string sesuai urutan ProductVariantOption, contoh: ["Ubin","M"]
+  stock       Int    @default(0)
+
+  orderItems OrderItem[]
+
+  @@index([productId])
+  @@map("product_variants")
+}
+
+model ProductStory {
+  id            String   @id @default(cuid())
+  productId     String   @unique
+  product       Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  title         String
+  content       String   @db.Text
+  processImages Json // array of string URL
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("product_stories")
+}
+
+// ----------------------------------------------------------------------------
+// RESERVASI / PESANAN
+// ----------------------------------------------------------------------------
+
+// Order = "header" satu transaksi reservasi (satu jadwal pickup, satu metode
+// bayar, satu status keseluruhan). Bisa berisi 1 atau lebih produk lewat
+// OrderItem — disiapkan untuk kemungkinan multi-produk sekali reservasi,
+// meski alur yang berjalan sekarang masih 1 produk per transaksi (OrderItem
+// akan selalu berjumlah 1 baris kalau memang tidak ada fitur "tambah produk
+// lain" di checkout).
+model Order {
+  id            String        @id @default(cuid())
+  orderNumber   String        @unique // format "SDK-XXXX"
+  userId        String
+  user          User          @relation(fields: [userId], references: [id])
+  paymentMethod PaymentMethod
+  status        OrderStatus   @default(menunggu_bayar)
+  totalAmount   Int // jumlah dari semua OrderItem, disimpan sebagai snapshot
+
+  pickupDate DateTime
+  pickupSlot String // contoh: "10:00"
+
+  // Khusus paymentMethod = cod
+  holdExpiresAt       DateTime?
+  holdExtendedMinutes Int       @default(0) // akumulasi extend, divalidasi max 2 hari total dari createdAt
+
+  // Khusus paymentMethod = midtrans (lunas langsung)
+  pickupDeadline DateTime? // createdAt/pickupDate + AppSettings.pickupDeadlineDays
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items   OrderItem[]
+  payment Payment?
+
+  @@index([userId])
+  @@index([status])
+  @@map("orders")
+}
+
+// Satu baris produk (+varian) di dalam sebuah Order. Kalau alur checkout
+// tetap 1-produk-per-transaksi selamanya, tabel ini ya isinya cuma 1 baris
+// per Order — tapi strukturnya sudah siap kalau nanti mau dikembangkan jadi
+// keranjang multi-produk tanpa perlu migrasi skema dari nol.
+model OrderItem {
+  id            String          @id @default(cuid())
+  orderId       String
+  order         Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId     String
+  product       Product         @relation(fields: [productId], references: [id])
+  variantId     String? // null = produk tanpa varian
+  variant       ProductVariant? @relation(fields: [variantId], references: [id])
+  quantity      Int             @default(1)
+  priceSnapshot Int // harga per unit saat pemesanan (harga produk bisa berubah belakangan)
+
+  review Review?
+
+  @@index([orderId])
+  @@index([productId])
+  @@map("order_items")
+}
+
+model Payment {
+  id                   String    @id @default(cuid())
+  orderId              String    @unique
+  order                Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  midtransTransactionId String?
+  status               String // sesuai status dari Midtrans (settlement, pending, expire, dll)
+  paidAt               DateTime?
+  createdAt            DateTime  @default(now())
+
+  @@map("payments")
+}
+
+// ----------------------------------------------------------------------------
+// ULASAN
+// ----------------------------------------------------------------------------
+
+model Review {
+  id          String       @id @default(cuid())
+  userId      String
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId   String? // null = ulasan umum toko (tampil di landing page)
+  product     Product?     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  orderItemId String?      @unique // idealnya terisi untuk memastikan reviewer benar-benar pernah membeli produk ini
+  orderItem   OrderItem?   @relation(fields: [orderItemId], references: [id], onDelete: SetNull)
+  rating      Int // 1-5
+  comment     String       @db.Text
+  status      ReviewStatus @default(tampil)
+  createdAt   DateTime     @default(now())
+
+  @@index([productId])
+  @@map("reviews")
+}
+
+// ----------------------------------------------------------------------------
+// NOTIFIKASI IN-APP
+// ----------------------------------------------------------------------------
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType @default(umum)
+  title     String
+  body      String           @db.Text
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
+// ----------------------------------------------------------------------------
+// PENGATURAN ADMIN (single row / singleton)
+// ----------------------------------------------------------------------------
+
+model AppSettings {
+  id                  Int      @id @default(1)
+  holdDurationMinutes Int      @default(120) // default 2 jam, khusus Cash/QRIS
+  autoCancelEnabled   Boolean  @default(true)
+  pickupDeadlineDays  Int      @default(14) // opsi yang divalidasi di aplikasi: 7 / 14 / 30
+  whatsappAdminNumber String?
+  notificationEmail   String?
+  updatedAt           DateTime @updatedAt
+
+  @@map("app_settings")
+}
