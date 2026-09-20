@@ -70,6 +70,10 @@ router.post("/login", async (req, res, next) => {
       });
     }
 
+    if (!user.passwordHash) {
+      return res.status(401).json({ error: "Email atau password salah" });
+    }
+
     const match = await bcrypt.compare(password, user.passwordHash);
     if (!match) {
       return res.status(401).json({ error: "Email atau password salah" });
@@ -114,14 +118,12 @@ router.post("/google", async (req, res, next) => {
 
     let user = await prisma.user.findUnique({ where: { email } });
     if (!user) {
-      // Buat password acak yang aman untuk akun Google
-      const randomPassword = Math.random().toString(36).slice(-10) + "Aa1!";
-      const passwordHash = await bcrypt.hash(randomPassword, 10);
+      // User Google baru: passwordHash = null (tidak punya password)
       user = await prisma.user.create({
         data: {
           name: name || "Pengguna Google",
           email,
-          passwordHash,
+          passwordHash: null,
           avatarUrl: picture,
           role: "buyer",
           authProvider: "google",
@@ -220,7 +222,10 @@ router.post("/forgot-password/verify", async (req, res, next) => {
     const passwordHash = await bcrypt.hash(newPassword, 10);
     await prisma.user.update({
       where: { id: user.id },
-      data: { passwordHash, authProvider: "both" },
+      data: {
+        passwordHash,
+        authProvider: user.authProvider === "google" ? "both" : user.authProvider,
+      },
     });
 
     await prisma.otpCode.update({
