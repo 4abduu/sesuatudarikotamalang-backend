@@ -8,6 +8,8 @@ const ordersRoutes = require("./routes/orders.routes");
 const artisansRoutes = require("./routes/artisans.routes");
 const reviewsRoutes = require("./routes/reviews.routes");
 const adminRoutes = require("./routes/admin.routes");
+const paymentsRoutes = require("./routes/payments.routes");
+const notificationsRoutes = require("./routes/notifications.routes");
 
 const app = express();
 
@@ -25,6 +27,10 @@ app.use("/api/orders", ordersRoutes);
 app.use("/api/artisans", artisansRoutes);
 app.use("/api/reviews", reviewsRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/payments", paymentsRoutes);
+app.use("/api/notifications", notificationsRoutes);
+
+
 
 // 404 handler
 app.use((req, res) => {
@@ -37,7 +43,11 @@ app.use((err, req, res, next) => {
   res.status(err.status || 500).json({ error: err.message || "Internal server error" });
 });
 
+const { startOrderStatusJob } = require("./jobs/orderStatusJob");
+
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
   console.log(`Server jalan di http://localhost:${PORT}`);
+  startOrderStatusJob();
 });
+
