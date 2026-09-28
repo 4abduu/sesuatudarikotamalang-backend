@@ -248,6 +248,7 @@ model ProductStory {
   product       Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
   title         String
   content       String   @db.Text
+  coverImageUrl String?
   processImages Json // array of string URL
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt

@@ -6,12 +6,13 @@ const prisma = require("../lib/prisma");
 const { requireAuth } = require("../middleware/auth");
 const { validatePassword } = require("../lib/validatePassword");
 const { sendOtpEmail } = require("../lib/mailer");
+const { loginLimiter, otpRequestLimiter, otpVerifyLimiter, registerLimiter } = require("../middleware/rateLimiter");
 
 const router = express.Router();
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 // POST /api/auth/register
-router.post("/register", async (req, res, next) => {
+router.post("/register", registerLimiter, async (req, res, next) => {
   try {
     const { name, email, password } = req.body;
     if (!name || !email || !password) {
@@ -51,7 +52,7 @@ router.post("/register", async (req, res, next) => {
 });
 
 // POST /api/auth/login
-router.post("/login", async (req, res, next) => {
+router.post("/login", loginLimiter, async (req, res, next) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) {
@@ -151,7 +152,7 @@ router.post("/google", async (req, res, next) => {
 });
 
 // POST /api/auth/forgot-password/request — Minta OTP Reset Password
-router.post("/forgot-password/request", async (req, res, next) => {
+router.post("/forgot-password/request", otpRequestLimiter, async (req, res, next) => {
   try {
     const { email } = req.body;
     if (!email) {
@@ -184,7 +185,7 @@ router.post("/forgot-password/request", async (req, res, next) => {
 });
 
 // POST /api/auth/forgot-password/verify — Verifikasi OTP & Reset Password
-router.post("/forgot-password/verify", async (req, res, next) => {
+router.post("/forgot-password/verify", otpVerifyLimiter, async (req, res, next) => {
   try {
     const { email, code, newPassword } = req.body;
     if (!email || !code || !newPassword) {
@@ -240,7 +241,7 @@ router.post("/forgot-password/verify", async (req, res, next) => {
 });
 
 // POST /api/auth/change-email/request (butuh requireAuth) — Minta OTP Ganti Email
-router.post("/change-email/request", requireAuth, async (req, res, next) => {
+router.post("/change-email/request", otpRequestLimiter, requireAuth, async (req, res, next) => {
   try {
     const { newEmail } = req.body;
     if (!newEmail) {
@@ -278,7 +279,7 @@ router.post("/change-email/request", requireAuth, async (req, res, next) => {
 });
 
 // POST /api/auth/change-email/verify (butuh requireAuth) — Verifikasi OTP Ganti Email
-router.post("/change-email/verify", requireAuth, async (req, res, next) => {
+router.post("/change-email/verify", otpVerifyLimiter, requireAuth, async (req, res, next) => {
   try {
     const { code } = req.body;
     if (!code) {
@@ -330,6 +331,12 @@ router.post("/change-password", requireAuth, async (req, res, next) => {
     const user = await prisma.user.findUnique({ where: { id: req.user.id } });
     if (!user) {
       return res.status(404).json({ error: "User tidak ditemukan" });
+    }
+
+    if (!user.passwordHash) {
+      return res.status(400).json({
+        error: "Akun ini terdaftar via Google dan belum memiliki password. Gunakan Lupa Password untuk membuat password.",
+      });
     }
 
     const match = await bcrypt.compare(oldPassword, user.passwordHash);

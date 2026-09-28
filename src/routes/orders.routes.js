@@ -114,6 +114,9 @@ router.post("/", requireAuth, async (req, res, next) => {
       }
 
       if (variant) {
+        // Lock baris variant secara eksklusif (Pessimistic Locking) untuk mencegah race condition
+        await tx.$queryRaw`SELECT id FROM product_variants WHERE id = ${variant.id} FOR UPDATE`;
+
         // Hitung order aktif yang sedang mengikat varian ini
         const now = new Date();
         const activeOrdersCount = await tx.orderItem.count({
@@ -144,9 +147,21 @@ router.post("/", requireAuth, async (req, res, next) => {
         settings = await tx.appSettings.create({ data: { id: 1 } });
       }
 
-      // 5. Generate Order Number Unik (SDK-XXXX)
-      const randomFourDigits = Math.floor(1000 + Math.random() * 9000);
-      const orderNumber = `SDK-${randomFourDigits}`;
+      // 5. Generate Order Number Unik (SDK-XXXX) dengan retry loop untuk mencegah collision
+      let orderNumber = "";
+      let attempts = 0;
+      while (attempts < 10) {
+        const candidate = `SDK-${Math.floor(1000 + Math.random() * 9000)}`;
+        const existingOrder = await tx.order.findUnique({ where: { orderNumber: candidate } });
+        if (!existingOrder) {
+          orderNumber = candidate;
+          break;
+        }
+        attempts++;
+      }
+      if (!orderNumber) {
+        orderNumber = `SDK-${Date.now().toString().slice(-6)}`;
+      }
 
       const isMidtrans = paymentMethod === "midtrans";
       const now = new Date();
@@ -252,6 +267,12 @@ router.patch("/:id/cancel", requireAuth, async (req, res, next) => {
 
     if (order.userId !== req.user.id && req.user.role !== "admin") {
       return res.status(403).json({ error: "Tidak memiliki akses ke pesanan ini" });
+    }
+
+    if (req.user.role !== "admin" && order.status === "lunas") {
+      return res.status(403).json({
+        error: "Pesanan yang sudah lunas hanya bisa dibatalkan oleh Admin. Silakan hubungi admin via WhatsApp.",
+      });
     }
 
     if (order.status === "selesai" || order.status === "dibatalkan" || order.status === "kedaluwarsa") {

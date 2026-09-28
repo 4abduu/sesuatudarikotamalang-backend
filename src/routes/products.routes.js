@@ -148,21 +148,19 @@ router.post("/", requireAuth, requireRole("creator", "admin"), async (req, res, 
     // Cari artisanId pengunggah
     let artisanId;
     if (req.user.role === "admin") {
-      // Jika admin, izinkan spesifikasi artisanId di body atau gunakan default
-      if (req.body.artisanId) {
-        artisanId = req.body.artisanId;
-      } else {
-        const firstArtisan = await prisma.artisan.findFirst();
-        if (!firstArtisan) {
-          return res.status(400).json({ error: "Belum ada profil artisan/kreator di database" });
-        }
-        artisanId = firstArtisan.id;
+      if (!req.body.artisanId) {
+        return res.status(400).json({ error: "artisanId wajib diisi oleh Admin saat menambahkan produk" });
       }
+      const existingArtisan = await prisma.artisan.findUnique({ where: { id: req.body.artisanId } });
+      if (!existingArtisan) {
+        return res.status(404).json({ error: "Profil kreator (artisanId) tidak ditemukan" });
+      }
+      artisanId = req.body.artisanId;
     } else {
       // Creator: cari artisan yang terikat dengan userId ini
       const artisan = await prisma.artisan.findUnique({ where: { userId: req.user.id } });
-      if (!artisan) {
-        return res.status(403).json({ error: "Profil kreator tidak ditemukan" });
+      if (!artisan || artisan.status !== "aktif") {
+        return res.status(403).json({ error: "Profil kreator kamu tidak ditemukan atau sedang nonaktif" });
       }
       artisanId = artisan.id;
     }

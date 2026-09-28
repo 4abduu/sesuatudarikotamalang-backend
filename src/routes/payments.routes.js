@@ -1,4 +1,5 @@
 const express = require("express");
+const crypto = require("crypto");
 const prisma = require("../lib/prisma");
 
 const router = express.Router();
@@ -6,10 +7,23 @@ const router = express.Router();
 // POST /api/payments/webhook — Terima Notifikasi Webhook dari Server Midtrans (TANPA requireAuth)
 router.post("/webhook", async (req, res, next) => {
   try {
-    const { order_id, transaction_status, fraud_status, transaction_id } = req.body;
+    const { order_id, status_code, gross_amount, signature_key, transaction_status, fraud_status, transaction_id } = req.body;
 
     if (!order_id || !transaction_status) {
       return res.status(400).json({ error: "Payload webhook tidak valid" });
+    }
+
+    // Verifikasi Midtrans Signature Key (SHA512: order_id + status_code + gross_amount + ServerKey)
+    const serverKey = process.env.MIDTRANS_SERVER_KEY || "";
+    if (serverKey && signature_key) {
+      const expectedSignature = crypto
+        .createHash("sha512")
+        .update(`${order_id}${status_code}${gross_amount}${serverKey}`)
+        .digest("hex");
+
+      if (signature_key !== expectedSignature) {
+        return res.status(403).json({ error: "Signature webhook Midtrans tidak valid" });
+      }
     }
 
     // Cari pesanan berdasarkan orderNumber (contoh: SDK-XXXX)

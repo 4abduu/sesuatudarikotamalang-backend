@@ -4,12 +4,52 @@ const { requireAuth } = require("../middleware/auth");
 
 const router = express.Router();
 
+// GET /api/artisans/applications/mine — Cek status pengajuan konsinyasi milik user yang login (Daftarkan sebelum /:id)
+router.get("/applications/mine", requireAuth, async (req, res, next) => {
+  try {
+    const applications = await prisma.artisanApplication.findMany({
+      where: { userId: req.user.id },
+      orderBy: { submittedAt: "desc" },
+      include: { category: true },
+    });
+    res.json({ applications });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PUT /api/artisans/mine — Update profil kreator (bio, avatarUrl, brandName) oleh kreator sendiri (Daftarkan sebelum /:id)
+router.put("/mine", requireAuth, async (req, res, next) => {
+  try {
+    const artisan = await prisma.artisan.findUnique({ where: { userId: req.user.id } });
+    if (!artisan) {
+      return res.status(404).json({ error: "Profil kreator tidak ditemukan" });
+    }
+
+    const { brandName, bio, avatarUrl } = req.body;
+    const updated = await prisma.artisan.update({
+      where: { id: artisan.id },
+      data: {
+        ...(brandName && { brandName }),
+        ...(bio !== undefined && { bio }),
+        ...(avatarUrl !== undefined && { avatarUrl }),
+      },
+    });
+
+    res.json({ message: "Profil kreator berhasil diperbarui", artisan: updated });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/artisans — daftar kreator aktif
 router.get("/", async (req, res, next) => {
   try {
     const artisans = await prisma.artisan.findMany({
       where: { status: "aktif" },
-      include: { products: true },
+      include: {
+        products: { where: { isActive: true } },
+      },
     });
     res.json({ artisans });
   } catch (err) {
@@ -17,14 +57,19 @@ router.get("/", async (req, res, next) => {
   }
 });
 
-// GET /api/artisans/:id — profil + karya kreator
+// GET /api/artisans/:id — profil + karya kreator (hanya jika aktif dan produk aktif)
 router.get("/:id", async (req, res, next) => {
   try {
-    const artisan = await prisma.artisan.findUnique({
-      where: { id: req.params.id },
-      include: { products: { include: { story: true } } },
+    const artisan = await prisma.artisan.findFirst({
+      where: { id: req.params.id, status: "aktif" },
+      include: {
+        products: {
+          where: { isActive: true },
+          include: { story: true },
+        },
+      },
     });
-    if (!artisan) return res.status(404).json({ error: "Kreator tidak ditemukan" });
+    if (!artisan) return res.status(404).json({ error: "Kreator tidak ditemukan atau sedang nonaktif" });
     res.json({ artisan });
   } catch (err) {
     next(err);

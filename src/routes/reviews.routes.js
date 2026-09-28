@@ -23,9 +23,9 @@ router.get("/", async (req, res, next) => {
       orderBy: { createdAt: "desc" },
     });
 
-    // Hitung rating rata-rata jika productId diberikan
+    // Hitung rating rata-rata (baik untuk produk spesifik maupun toko keseluruhan)
     let avgRating = 0;
-    if (productId && reviews.length > 0) {
+    if (reviews.length > 0) {
       const sum = reviews.reduce((acc, r) => acc + r.rating, 0);
       avgRating = Number((sum / reviews.length).toFixed(1));
     }
@@ -36,7 +36,7 @@ router.get("/", async (req, res, next) => {
   }
 });
 
-// POST /api/reviews — Tambah ulasan baru (butuh login, orderItem harus berstatus 'selesai')
+// POST /api/reviews — Tambah ulasan baru (butuh login, wajib terikat pesanan yang sudah selesai)
 router.post("/", requireAuth, async (req, res, next) => {
   try {
     const { orderItemId, rating, comment } = req.body;
@@ -51,8 +51,8 @@ router.post("/", requireAuth, async (req, res, next) => {
 
     let productId = null;
 
-    // Jika review terikat pada orderItemId (ulasan spesifik barang yang dibeli)
     if (orderItemId) {
+      // Ulasan produk spesifik dari pesanan
       const orderItem = await prisma.orderItem.findUnique({
         where: { id: orderItemId },
         include: { order: true },
@@ -62,17 +62,14 @@ router.post("/", requireAuth, async (req, res, next) => {
         return res.status(404).json({ error: "Item pesanan tidak ditemukan" });
       }
 
-      // Validasi kepemilikan pesanan
       if (orderItem.order.userId !== req.user.id) {
         return res.status(403).json({ error: "Kamu tidak memiliki akses memberikan ulasan untuk pesanan ini" });
       }
 
-      // Validasi status pesanan harus 'selesai'
       if (orderItem.order.status !== "selesai") {
         return res.status(400).json({ error: "Ulasan hanya dapat diberikan untuk pesanan yang sudah selesai" });
       }
 
-      // Cek apakah item ini sudah pernah diulas
       const existingReview = await prisma.review.findUnique({
         where: { orderItemId },
       });
@@ -82,6 +79,25 @@ router.post("/", requireAuth, async (req, res, next) => {
       }
 
       productId = orderItem.productId;
+    } else {
+      // Ulasan umum toko: Syaratkan user pernah menyelesaikan minimal 1 pesanan & maksimal 1 ulasan toko per user
+      const completedOrder = await prisma.order.findFirst({
+        where: { userId: req.user.id, status: "selesai" },
+      });
+
+      if (!completedOrder) {
+        return res.status(403).json({
+          error: "Kamu harus pernah menyelesaikan minimal 1 pesanan di toko ini sebelum memberikan ulasan toko.",
+        });
+      }
+
+      const existingStoreReview = await prisma.review.findFirst({
+        where: { userId: req.user.id, productId: null, orderItemId: null },
+      });
+
+      if (existingStoreReview) {
+        return res.status(400).json({ error: "Kamu sudah pernah memberikan ulasan umum untuk toko ini." });
+      }
     }
 
     const review = await prisma.review.create({
@@ -95,8 +111,24 @@ router.post("/", requireAuth, async (req, res, next) => {
       },
       include: {
         user: { select: { id: true, name: true, avatarUrl: true } },
+        product: { include: { artisan: true } },
       },
     });
+
+    // Jika review untuk produk spesifik, kirim notifikasi 'ulasan_baru' ke kreator pembuat produk
+    if (review.product && review.product.artisan && review.product.artisan.userId) {
+      const creatorUserId = review.product.artisan.userId;
+      if (creatorUserId !== req.user.id) {
+        await prisma.notification.create({
+          data: {
+            userId: creatorUserId,
+            type: "ulasan_baru",
+            title: "Ulasan Baru Produk",
+            body: `${req.user.name} memberikan ulasan bintang ${rating} untuk produk "${review.product.name}": "${comment.trim()}"`,
+          },
+        }).catch(() => {});
+      }
+    }
 
     res.status(201).json({ review });
   } catch (err) {

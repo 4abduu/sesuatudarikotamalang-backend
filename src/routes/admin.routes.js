@@ -8,19 +8,77 @@ const router = express.Router();
 // Semua route di bawah ini WAJIB login sebagai admin
 router.use(requireAuth, requireRole("admin"));
 
-// GET /api/admin/dashboard — ringkasan buat StatCard dashboard
+// GET /api/admin/dashboard — ringkasan statcard + data grafik dashboard admin
 router.get("/dashboard", async (req, res, next) => {
   try {
-    const [ordersToday, readyForPickup, pendingApplications, lowStockCount] = await Promise.all([
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    const [
+      ordersToday,
+      readyForPickup,
+      pendingApplications,
+      lowStockCount,
+      statusDistribution,
+      topSellingProducts,
+      recentPaidOrders,
+    ] = await Promise.all([
+      // 1. Pesanan dengan jadwal pickup HARI INI saja
       prisma.order.count({
-        where: { pickupDate: { gte: new Date(new Date().setHours(0, 0, 0, 0)) } },
+        where: {
+          pickupDate: { gte: startOfDay, lte: endOfDay },
+        },
       }),
+      // 2. Siap pickup (status lunas)
       prisma.order.count({ where: { status: "lunas" } }),
+      // 3. Pengajuan konsinyasi pending
       prisma.artisanApplication.count({ where: { status: "pending" } }),
-      prisma.productVariant.count({ where: { stock: { lt: 6 } } }),
+      // 4. Stok menipis (<6 pcs) HANYA untuk produk aktif
+      prisma.productVariant.count({
+        where: {
+          stock: { lt: 6 },
+          product: { isActive: true },
+        },
+      }),
+      // 5. Distribusi status pesanan
+      prisma.order.groupBy({
+        by: ["status"],
+        _count: { _all: true },
+      }),
+      // 6. Produk terlaris (soldCount tertinggi)
+      prisma.product.findMany({
+        where: { isActive: true },
+        orderBy: { soldCount: "desc" },
+        take: 5,
+        include: { artisan: { select: { brandName: true } }, category: true },
+      }),
+      // 7. Pesanan 7 hari terakhir (untuk hitung pendapatan 7 hari terakhir)
+      prisma.order.findMany({
+        where: {
+          createdAt: { gte: sevenDaysAgo },
+          OR: [{ status: "lunas" }, { status: "selesai" }],
+        },
+        select: { totalAmount: true, createdAt: true },
+      }),
     ]);
 
-    res.json({ ordersToday, readyForPickup, pendingApplications, lowStockCount });
+    const revenue7Days = recentPaidOrders.reduce((sum, o) => sum + o.totalAmount, 0);
+
+    res.json({
+      ordersToday,
+      readyForPickup,
+      pendingApplications,
+      lowStockCount,
+      revenue7Days,
+      statusDistribution: statusDistribution.map((s) => ({ status: s.status, count: s._count._all })),
+      topSellingProducts,
+    });
   } catch (err) {
     next(err);
   }
@@ -218,14 +276,58 @@ router.patch("/orders/:id/status", async (req, res, next) => {
       return res.status(400).json({ error: "Status tidak valid" });
     }
 
-    const order = await prisma.order.findUnique({ where: { id } });
+    const order = await prisma.order.findUnique({
+      where: { id },
+      include: { items: true },
+    });
     if (!order) {
       return res.status(404).json({ error: "Pesanan tidak ditemukan" });
     }
 
-    const updatedOrder = await prisma.order.update({
-      where: { id },
-      data: { status },
+    const oldStatus = order.status;
+
+    const updatedOrder = await prisma.$transaction(async (tx) => {
+      // 1. Jika pindah ke 'lunas' dan pickupDeadline belum ada, hitung pickupDeadline
+      let pickupDeadline = order.pickupDeadline;
+      if (status === "lunas" && !pickupDeadline) {
+        let settings = await tx.appSettings.findUnique({ where: { id: 1 } });
+        const deadlineDays = settings?.pickupDeadlineDays || 14;
+        pickupDeadline = new Date(new Date(order.pickupDate).getTime() + deadlineDays * 86400000);
+      }
+
+      // 2. Update status order
+      const updated = await tx.order.update({
+        where: { id },
+        data: {
+          status,
+          ...(pickupDeadline && { pickupDeadline }),
+        },
+      });
+
+      // 3. Increment soldCount jika order COD berpindah ke 'selesai' untuk pertama kali
+      if (order.paymentMethod === "cod" && status === "selesai" && oldStatus !== "selesai") {
+        for (const item of order.items) {
+          await tx.product.update({
+            where: { id: item.productId },
+            data: { soldCount: { increment: item.quantity } },
+          });
+        }
+      }
+
+      // 4. Kirim notifikasi in-app ke pengguna mengenai perubahan status pesanan
+      if (oldStatus !== status) {
+        const readableStatus = status.replace(/_/g, " ");
+        await tx.notification.create({
+          data: {
+            userId: order.userId,
+            type: "pesanan_update",
+            title: "Update Status Pesanan",
+            body: `Pesanan kamu (${order.orderNumber}) telah diperbarui menjadi: ${readableStatus}.`,
+          },
+        });
+      }
+
+      return updated;
     });
 
     res.json({ message: "Status pesanan berhasil diperbarui", order: updatedOrder });
@@ -313,14 +415,27 @@ router.post("/scan-qr/verify", async (req, res, next) => {
       return res.status(400).json({ error: `Pesanan tidak dapat diambil karena berstatus ${order.status}`, order });
     }
 
-    // Ubah status pesanan menjadi 'selesai'
-    const updatedOrder = await prisma.order.update({
-      where: { id: order.id },
-      data: { status: "selesai" },
-      include: {
-        user: { select: { id: true, name: true, email: true } },
-        items: { include: { product: true, variant: true } },
-      },
+    // Ubah status pesanan menjadi 'selesai' dan increment soldCount jika COD (karena Midtrans sudah dihitung saat webhook)
+    const updatedOrder = await prisma.$transaction(async (tx) => {
+      const updated = await tx.order.update({
+        where: { id: order.id },
+        data: { status: "selesai" },
+        include: {
+          user: { select: { id: true, name: true, email: true } },
+          items: { include: { product: true, variant: true } },
+        },
+      });
+
+      if (order.paymentMethod === "cod" && order.status !== "selesai") {
+        for (const item of order.items) {
+          await tx.product.update({
+            where: { id: item.productId },
+            data: { soldCount: { increment: item.quantity } },
+          });
+        }
+      }
+
+      return updated;
     });
 
     res.json({
