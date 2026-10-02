@@ -3,6 +3,7 @@ const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
 
+const path = require("path");
 const authRoutes = require("./routes/auth.routes");
 const productsRoutes = require("./routes/products.routes");
 const ordersRoutes = require("./routes/orders.routes");
@@ -11,11 +12,16 @@ const reviewsRoutes = require("./routes/reviews.routes");
 const adminRoutes = require("./routes/admin.routes");
 const paymentsRoutes = require("./routes/payments.routes");
 const notificationsRoutes = require("./routes/notifications.routes");
+const searchRoutes = require("./routes/search.routes");
+const uploadRoutes = require("./routes/upload.routes");
 
 const app = express();
 
 // Helmet — Security HTTP headers (HSTS, noSniff, XSS filter, dll.)
-app.use(helmet());
+app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
+
+// Serve static uploaded files
+app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 
 // CORS — batasi origin di produksi, buka untuk development jika env tidak diset
 const allowedOrigins = process.env.CORS_ALLOWED_ORIGINS
@@ -52,6 +58,8 @@ app.use("/api/reviews", reviewsRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/payments", paymentsRoutes);
 app.use("/api/notifications", notificationsRoutes);
+app.use("/api/search", searchRoutes);
+app.use("/api/upload", uploadRoutes);
 
 // 404 handler
 app.use((req, res) => {
