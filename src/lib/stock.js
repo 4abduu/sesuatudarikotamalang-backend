@@ -10,31 +10,56 @@ const prisma = require("./prisma");
  * @param {string} variantId
  * @returns {Promise<number>}
  */
-async function effectiveStock(variantId) {
-  const variant = await prisma.productVariant.findUnique({
+async function effectiveStock(variantId, tx = prisma) {
+  const variant = await tx.productVariant.findUnique({
     where: { id: variantId },
   });
   if (!variant) return 0;
 
   const now = new Date();
 
-  const activeOrdersCount = await prisma.orderItem.count({
+  // Ambil pengaturan sistem autoCancelEnabled
+  const settings = await tx.appSettings.findUnique({ where: { id: 1 } });
+  const autoCancelEnabled = settings?.autoCancelEnabled ?? true;
+
+  const activeOrderConditions = [
+    { status: "lunas" },
+    { status: "selesai" },
+    { status: "lewat_batas_pengambilan" },
+    {
+      status: "menunggu_bayar",
+      paymentMethod: "midtrans",
+      holdExpiresAt: { gt: now },
+    },
+  ];
+
+  if (autoCancelEnabled) {
+    activeOrderConditions.push({
+      status: "menunggu_bayar",
+      paymentMethod: "cod",
+      holdExpiresAt: { gt: now },
+    });
+  } else {
+    activeOrderConditions.push({
+      status: "menunggu_bayar",
+      paymentMethod: "cod",
+    });
+  }
+
+  const activeOrdersAggregate = await tx.orderItem.aggregate({
+    _sum: {
+      quantity: true,
+    },
     where: {
       variantId,
       order: {
-        OR: [
-          { status: "lunas" },
-          { status: "selesai" },
-          {
-            status: "menunggu_bayar",
-            holdExpiresAt: { gt: now },
-          },
-        ],
+        OR: activeOrderConditions,
       },
     },
   });
 
-  return Math.max(0, variant.stock - activeOrdersCount);
+  const activeCount = activeOrdersAggregate._sum.quantity ?? 0;
+  return Math.max(0, variant.stock - activeCount);
 }
 
 /**

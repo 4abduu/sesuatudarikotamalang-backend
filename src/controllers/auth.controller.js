@@ -1,4 +1,5 @@
 const bcrypt = require("bcrypt");
+const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const { OAuth2Client } = require("google-auth-library");
 const prisma = require("../lib/prisma");
@@ -97,15 +98,25 @@ const googleLogin = async (req, res, next) => {
       return res.status(400).json({ error: "idToken wajib dikirim" });
     }
 
+    // F-10: Jangan terima token Google jika GOOGLE_CLIENT_ID belum diset
+    if (!process.env.GOOGLE_CLIENT_ID) {
+      return res.status(503).json({ error: "Google login belum dikonfigurasi" });
+    }
+
     let payload;
     try {
       const ticket = await googleClient.verifyIdToken({
         idToken,
-        audience: process.env.GOOGLE_CLIENT_ID || undefined,
+        audience: process.env.GOOGLE_CLIENT_ID,
       });
       payload = ticket.getPayload();
     } catch (verifyErr) {
       return res.status(401).json({ error: "Token Google tidak valid atau kedaluwarsa" });
+    }
+
+    // F-10: Tolak jika email belum diverifikasi oleh Google
+    if (payload.email_verified !== true) {
+      return res.status(403).json({ error: "Email Google belum diverifikasi" });
     }
 
     const { email, name, picture } = payload;
@@ -151,7 +162,7 @@ const googleLogin = async (req, res, next) => {
 const forgotPasswordRequest = async (req, res, next) => {
   try {
     const { email } = req.body;
-    if (!email) {
+    if (!email || typeof email !== "string") {
       return res.status(400).json({ error: "email wajib diisi" });
     }
 
@@ -160,8 +171,14 @@ const forgotPasswordRequest = async (req, res, next) => {
       return res.status(404).json({ error: "Email tidak ditemukan" });
     }
 
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const code = crypto.randomInt(100000, 1000000).toString();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 menit
+
+    // Invalidasi OTP lama dengan purpose yang sama
+    await prisma.otpCode.updateMany({
+      where: { userId: user.id, purpose: "lupa_password", isUsed: false },
+      data: { isUsed: true },
+    });
 
     await prisma.otpCode.create({
       data: {
@@ -184,8 +201,17 @@ const forgotPasswordRequest = async (req, res, next) => {
 const forgotPasswordVerify = async (req, res, next) => {
   try {
     const { email, code, newPassword } = req.body;
-    if (!email || !code || !newPassword) {
-      return res.status(400).json({ error: "email, code, dan newPassword wajib diisi" });
+    // F-01: Validasi tipe ketat — cegah injeksi operator Prisma
+    if (
+      typeof email !== "string" ||
+      typeof code !== "string" ||
+      typeof newPassword !== "string" ||
+      !email || !code || !newPassword
+    ) {
+      return res.status(400).json({ error: "email, code, dan newPassword wajib diisi (string)" });
+    }
+    if (!/^\d{6}$/.test(code)) {
+      return res.status(400).json({ error: "Kode OTP harus berupa 6 digit angka" });
     }
 
     const user = await prisma.user.findUnique({ where: { email } });
@@ -240,7 +266,7 @@ const forgotPasswordVerify = async (req, res, next) => {
 const changeEmailRequest = async (req, res, next) => {
   try {
     const { newEmail } = req.body;
-    if (!newEmail) {
+    if (!newEmail || typeof newEmail !== "string") {
       return res.status(400).json({ error: "newEmail wajib diisi" });
     }
 
@@ -253,8 +279,14 @@ const changeEmailRequest = async (req, res, next) => {
       return res.status(409).json({ error: "Email baru sudah digunakan oleh akun lain" });
     }
 
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const code = crypto.randomInt(100000, 1000000).toString();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+    // Invalidasi OTP lama dengan purpose yang sama
+    await prisma.otpCode.updateMany({
+      where: { userId: req.user.id, purpose: "ganti_email", isUsed: false },
+      data: { isUsed: true },
+    });
 
     await prisma.otpCode.create({
       data: {
@@ -278,8 +310,12 @@ const changeEmailRequest = async (req, res, next) => {
 const changeEmailVerify = async (req, res, next) => {
   try {
     const { code } = req.body;
-    if (!code) {
-      return res.status(400).json({ error: "code wajib diisi" });
+    // F-01: Validasi tipe ketat — cegah injeksi operator Prisma
+    if (typeof code !== "string" || !code) {
+      return res.status(400).json({ error: "code wajib diisi (string)" });
+    }
+    if (!/^\d{6}$/.test(code)) {
+      return res.status(400).json({ error: "Kode OTP harus berupa 6 digit angka" });
     }
 
     const otpRecord = await prisma.otpCode.findFirst({

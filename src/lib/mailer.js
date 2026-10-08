@@ -260,12 +260,23 @@ async function sendOtpEmail(to, code, purpose) {
 
   const fromEmail = process.env.RESEND_FROM_EMAIL || "Sesuatu DariKota Malang <onboarding@resend.dev>";
 
-  return await resend.emails.send({
+  const result = await resend.emails.send({
     from: fromEmail,
     to,
     subject: copy.subject,
     html: htmlContent,
   });
+
+  // F-08: Resend API v6 mengembalikan { data, error }, bukan melempar exception
+  if (result.error) {
+    console.error("[RESEND ERROR]", result.error);
+    throw {
+      status: 502,
+      message: `Gagal mengirim email OTP: ${result.error.message || "Layanan email bermasalah"}`,
+    };
+  }
+
+  return result.data;
 }
 
 module.exports = { sendOtpEmail };

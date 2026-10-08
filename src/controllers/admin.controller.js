@@ -128,11 +128,15 @@ const approveApplication = async (req, res, next) => {
         });
       }
 
-      // 2. Ubah role user jadi "creator"
-      await tx.user.update({
-        where: { id: application.userId },
-        data: { role: "creator" },
-      });
+      // 2. Ubah role user jadi "creator" — tapi jangan turunkan admin
+      // F-19: Lindungi role admin agar tidak tertimpa
+      const targetUser = await tx.user.findUnique({ where: { id: application.userId } });
+      if (targetUser && targetUser.role !== "admin") {
+        await tx.user.update({
+          where: { id: application.userId },
+          data: { role: "creator" },
+        });
+      }
 
       // 3. Update status ArtisanApplication -> "diterima"
       const updatedApp = await tx.artisanApplication.update({
@@ -387,54 +391,76 @@ const verifyScanQr = async (req, res, next) => {
       return res.status(400).json({ error: "orderNumber wajib diisi" });
     }
 
-    const order = await prisma.order.findUnique({
-      where: { orderNumber: orderNumber.trim() },
-      include: {
-        user: { select: { id: true, name: true, email: true } },
-        items: { include: { product: true, variant: true } },
-      },
-    });
+    const updatedOrder = await prisma.$transaction(
+      async (tx) => {
+        // Cari dan lock order di dalam transaksi (F-06: Mencegah race condition double scan)
+        const rawOrder = await tx.order.findUnique({
+          where: { orderNumber: orderNumber.trim() },
+        });
 
-    if (!order) {
-      return res.status(404).json({ error: "Pesanan tidak ditemukan" });
-    }
-
-    if (order.status === "selesai") {
-      return res.status(400).json({ error: "Pesanan ini sudah pernah diambil (status: Selesai)", order });
-    }
-
-    if (order.status === "dibatalkan" || order.status === "kedaluwarsa") {
-      return res.status(400).json({ error: `Pesanan tidak dapat diambil karena berstatus ${order.status}`, order });
-    }
-
-    // Ubah status pesanan menjadi 'selesai' dan increment soldCount jika COD (karena Midtrans sudah dihitung saat webhook)
-    const updatedOrder = await prisma.$transaction(async (tx) => {
-      const updated = await tx.order.update({
-        where: { id: order.id },
-        data: { status: "selesai" },
-        include: {
-          user: { select: { id: true, name: true, email: true } },
-          items: { include: { product: true, variant: true } },
-        },
-      });
-
-      if (order.paymentMethod === "cod" && order.status !== "selesai") {
-        for (const item of order.items) {
-          await tx.product.update({
-            where: { id: item.productId },
-            data: { soldCount: { increment: item.quantity } },
-          });
+        if (!rawOrder) {
+          throw { status: 404, message: "Pesanan tidak ditemukan" };
         }
-      }
 
-      return updated;
-    });
+        await tx.$queryRaw`SELECT id FROM orders WHERE id = ${rawOrder.id} FOR UPDATE`;
+
+        const order = await tx.order.findUnique({
+          where: { id: rawOrder.id },
+          include: {
+            user: { select: { id: true, name: true, email: true } },
+            items: { include: { product: true, variant: true } },
+          },
+        });
+
+        if (order.status === "selesai") {
+          throw { status: 400, message: "Pesanan ini sudah pernah diambil (status: Selesai)", order };
+        }
+
+        if (order.status === "dibatalkan" || order.status === "kedaluwarsa") {
+          throw { status: 400, message: `Pesanan tidak dapat diambil karena berstatus ${order.status}`, order };
+        }
+
+        // F-06: Tolak jika pesanan Midtrans belum dibayar (status bukan lunas/lewat_batas_pengambilan)
+        if (order.paymentMethod === "midtrans" && !["lunas", "lewat_batas_pengambilan"].includes(order.status)) {
+          throw {
+            status: 400,
+            message: `Pesanan Midtrans berstatus '${order.status}' belum lunas dan tidak dapat diserahkan`,
+            order,
+          };
+        }
+
+        const updated = await tx.order.update({
+          where: { id: order.id },
+          data: { status: "selesai" },
+          include: {
+            user: { select: { id: true, name: true, email: true } },
+            items: { include: { product: true, variant: true } },
+          },
+        });
+
+        // Increment soldCount HANYA jika COD (karena Midtrans sudah dihitung saat webhook settlement)
+        if (order.paymentMethod === "cod") {
+          for (const item of order.items) {
+            await tx.product.update({
+              where: { id: item.productId },
+              data: { soldCount: { increment: item.quantity } },
+            });
+          }
+        }
+
+        return updated;
+      },
+      { isolationLevel: "ReadCommitted" }
+    );
 
     res.json({
       message: "Verifikasi pickup berhasil! Pesanan telah ditandai Selesai",
       order: updatedOrder,
     });
   } catch (err) {
+    if (err.status) {
+      return res.status(err.status).json({ error: err.message, order: err.order });
+    }
     next(err);
   }
 };

@@ -2,4 +2,7 @@ node_modules/
 .env
 *.log
 dist/
-README.md
+uploads/*
+!uploads/.gitkeep
+tests/golden/
+tests/*.local.http

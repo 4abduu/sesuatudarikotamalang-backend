@@ -83,6 +83,13 @@ const applyConsignment = async (req, res, next) => {
       });
     }
 
+    // F-19: Hanya buyer yang boleh mengajukan konsinyasi
+    if (req.user.role !== "buyer") {
+      return res.status(403).json({
+        error: "Hanya pengguna dengan role buyer yang dapat mengajukan konsinyasi",
+      });
+    }
+
     // Cek jika user sudah punya pengajuan yang masih status pending
     const existingPending = await prisma.artisanApplication.findFirst({
       where: { userId: req.user.id, status: "pending" },

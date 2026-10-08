@@ -1,54 +1,55 @@
-# Sesuatu DariKota Malang — Backend
+# Sesuatu DariKota Malang — Backend API
 
-API (Express.js + Prisma + MySQL).
+Backend API berbasis Express.js, Prisma ORM, dan MySQL untuk platform **Sesuatu DariKota Malang**.
 
 ## Setup Pertama Kali
 
-1. Pastikan MySQL sudah jalan (misal lewat Laragon), lalu buat database-nya:
+1. Pastikan MySQL sudah jalan (misal lewat Laragon), lalu buat database:
    ```sql
    CREATE DATABASE sesuatu_darikota_malang;
    ```
-2. Copy `.env.example` jadi `.env`, isi `DATABASE_URL` sesuai MySQL lokal kamu, dan isi `JWT_SECRET` dengan string acak (bisa generate lewat `openssl rand -base64 32` atau ketik bebas string panjang).
+2. Salin `.env.example` menjadi `.env`, isi `DATABASE_URL` sesuai MySQL lokal, dan isi `JWT_SECRET` dengan string acak aman:
+   ```env
+   DATABASE_URL="mysql://root:@localhost:3306/sesuatu_darikota_malang"
+   JWT_SECRET="rahasia_jwt_super_aman"
+   ```
 3. Install dependency:
    ```bash
    npm install
    ```
-4. Generate Prisma client & bikin tabel di database:
+4. Jalankan migrasi Prisma untuk membuat skema tabel database:
    ```bash
-   npm run prisma:generate
-   npm run prisma:push
+   npm run prisma:migrate
    ```
-5. Jalankan server:
+5. Jalankan server pengembangan:
    ```bash
    npm run dev
    ```
-   Server jalan di `http://localhost:4000`. Cek `GET /` harus balas `{ "status": "ok", ... }`.
+   Server akan berjalan di `http://localhost:4000`. Akses `GET /` untuk memastikan server aktif `{ "status": "ok", ... }`.
 
-## Struktur
+## Struktur Project
 
 ```
 src/
-├── index.js              # entry point
-├── lib/prisma.js         # PrismaClient singleton
-├── middleware/           # auth.js (verifikasi JWT), requireRole.js (cek role)
-├── routes/                # 1 file per domain (auth, products, orders, artisans, reviews, admin)
-└── controllers/           # (opsional) pisahkan logic dari routes kalau makin kompleks
+├── index.js              # Entry point aplikasi & fail-fast env check
+├── lib/                  # Module helper (prisma.js, stock.js, midtrans.js)
+├── middleware/           # auth.js (JWT verifier), requireRole.js, rateLimiter.js
+├── routes/               # Express router (auth, products, orders, payments, admin, dll.)
+├── controllers/          # Business logic handlers
+└── jobs/                 # Cron jobs (orderStatusJob.js)
 ```
 
-## Endpoint yang Sudah Ada (Contoh Kerja)
+## Endpoint API Utama
 
-- `POST /api/auth/register`
-- `POST /api/auth/login`
-- `GET /api/auth/me` (butuh header `Authorization: Bearer <token>`)
-- `GET /api/products`, `GET /api/products/:id`
-- `GET /api/artisans`, `GET /api/artisans/:id`
-- `GET /api/reviews?productId=...`
-- `GET /api/orders` (butuh login)
-- `GET /api/admin/dashboard` (butuh login sebagai admin)
+- **Auth**: `POST /api/auth/register`, `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/google`
+- **Katalog & Produk**: `GET /api/products`, `GET /api/products/:id`, `POST /api/products`
+- **Pesanan**: `POST /api/orders`, `GET /api/orders`, `GET /api/orders/:id`, `PATCH /api/orders/:id/cancel`
+- **Pembayaran**: `POST /api/payments/webhook` (Server-to-Server Midtrans Notification)
+- **Admin**: `GET /api/admin/dashboard`, `GET /api/admin/orders`, `PATCH /api/admin/orders/:id/status`, `GET /api/admin/applications`
 
-Sisanya masih `TODO` di tiap file route — lihat komentar di masing-masing file untuk detail apa yang perlu dibangun, sesuai aturan bisnis di `docs/dokumen-master-sesuatu-darikota-malang.md`.
+Dokumentasi arsitektur dan aturan bisnis lengkap dapat dirujuk pada folder `docs/` (`docs/dokumen-master-sesuatu-darikota-malang.md` dan `docs/master-dokumen-v2.md`).
 
-## Prisma Studio (GUI lihat data)
+## Prisma Studio (GUI Data)
 
 ```bash
 npm run prisma:studio

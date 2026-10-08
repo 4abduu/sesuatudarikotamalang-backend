@@ -1,4 +1,5 @@
 const prisma = require("../lib/prisma");
+const { effectiveStock } = require("../lib/stock");
 
 // GET /api/orders — Riwayat pesanan milik user yang sedang login
 const listOrders = async (req, res, next) => {
@@ -76,7 +77,8 @@ const createOrder = async (req, res, next) => {
     }
 
     // Pengecekan dan pembuatan order dilakukan dalam SATU transaksi database (Atomic)
-    const newOrder = await prisma.$transaction(async (tx) => {
+    const newOrder = await prisma.$transaction(
+      async (tx) => {
       // 1. Ambil data produk
       const product = await tx.product.findUnique({
         where: { id: productId },
@@ -105,36 +107,24 @@ const createOrder = async (req, res, next) => {
         if (!variant || variant.productId !== product.id) {
           throw { status: 400, message: "Varian tidak valid untuk produk ini" };
         }
-      } else if (variantId) {
-        variant = await tx.productVariant.findUnique({ where: { id: variantId } });
+      } else {
+        // Produk tanpa varian: gunakan varian default (combination: [])
+        variant = await tx.productVariant.findFirst({
+          where: { productId: product.id },
+          orderBy: { id: "asc" },
+        });
       }
 
-      if (variant) {
-        // Lock baris variant secara eksklusif (Pessimistic Locking) untuk mencegah race condition
-        await tx.$queryRaw`SELECT id FROM product_variants WHERE id = ${variant.id} FOR UPDATE`;
+      if (!variant) {
+        throw { status: 400, message: "Varian produk tidak ditemukan" };
+      }
 
-        // Hitung order aktif yang sedang mengikat varian ini
-        const now = new Date();
-        const activeOrdersCount = await tx.orderItem.count({
-          where: {
-            variantId: variant.id,
-            order: {
-              OR: [
-                { status: "lunas" },
-                { status: "selesai" },
-                {
-                  status: "menunggu_bayar",
-                  holdExpiresAt: { gt: now },
-                },
-              ],
-            },
-          },
-        });
+      // Lock baris variant secara eksklusif (Pessimistic Locking) untuk mencegah race condition
+      await tx.$queryRaw`SELECT id FROM product_variants WHERE id = ${variant.id} FOR UPDATE`;
 
-        const effectiveStock = Math.max(0, variant.stock - activeOrdersCount);
-        if (effectiveStock <= 0) {
-          throw { status: 409, message: "Maaf, stok kombinasi ini baru saja habis. Coba varian lain" };
-        }
+      const effStock = await effectiveStock(variant.id, tx);
+      if (effStock <= 0) {
+        throw { status: 409, message: "Maaf, stok produk ini baru saja habis" };
       }
 
       // 4. Ambil Pengaturan Sistem (AppSettings)
@@ -162,10 +152,9 @@ const createOrder = async (req, res, next) => {
       const isMidtrans = paymentMethod === "midtrans";
       const now = new Date();
 
-      // Durasi Hold untuk COD/Cash (Default 120 menit / 2 jam)
-      const holdExpiresAt = !isMidtrans
-        ? new Date(now.getTime() + (settings.holdDurationMinutes || 120) * 60000)
-        : null;
+      // Durasi Hold (COD default 120 menit; Midtrans hold 60 menit agar tidak menahan stok tanpa batas)
+      const holdMinutes = isMidtrans ? 60 : (settings.holdDurationMinutes || 120);
+      const holdExpiresAt = new Date(now.getTime() + holdMinutes * 60000);
 
       // Batas Pengambilan untuk Midtrans Lunas (Default 14 hari)
       const pickupDeadline = isMidtrans
@@ -201,7 +190,7 @@ const createOrder = async (req, res, next) => {
       });
 
       return createdOrder;
-    });
+    }, { isolationLevel: "ReadCommitted" });
 
     // Jika paymentMethod === "midtrans", buat Snap Transaction Token
     let snapResponse = null;
@@ -214,6 +203,10 @@ const createOrder = async (req, res, next) => {
           transaction_details: {
             order_id: newOrder.orderNumber,
             gross_amount: newOrder.totalAmount,
+          },
+          expiry: {
+            unit: "minute",
+            duration: 60,
           },
           customer_details: {
             first_name: user ? user.name : "Customer",
@@ -265,9 +258,9 @@ const cancelOrder = async (req, res, next) => {
       return res.status(403).json({ error: "Tidak memiliki akses ke pesanan ini" });
     }
 
-    if (req.user.role !== "admin" && order.status === "lunas") {
+    if (req.user.role !== "admin" && (order.status === "lunas" || order.status === "lewat_batas_pengambilan")) {
       return res.status(403).json({
-        error: "Pesanan yang sudah lunas hanya bisa dibatalkan oleh Admin. Silakan hubungi admin via WhatsApp.",
+        error: "Pesanan yang sudah lunas atau lewat batas pengambilan hanya bisa dibatalkan oleh Admin.",
       });
     }
 

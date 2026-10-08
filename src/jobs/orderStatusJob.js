@@ -12,17 +12,37 @@ function startOrderStatusJob() {
     try {
       const now = new Date();
 
-      // 1. Cash/QRIS yang hold-nya habis tanpa aksi -> kedaluwarsa
-      const expiredHoldOrders = await prisma.order.updateMany({
+      const settings = await prisma.appSettings.findUnique({ where: { id: 1 } });
+      const autoCancelEnabled = settings?.autoCancelEnabled ?? true;
+
+      // 1a. Midtrans yang hold-nya (60 menit) habis -> SELALU diubah ke kedaluwarsa (tanpa tergantung autoCancelEnabled)
+      const expiredMidtrans = await prisma.order.updateMany({
         where: {
+          paymentMethod: "midtrans",
           status: "menunggu_bayar",
           holdExpiresAt: { lt: now },
         },
         data: { status: "kedaluwarsa" },
       });
 
-      if (expiredHoldOrders.count > 0) {
-        console.log(`[CRON] ${expiredHoldOrders.count} pesanan diubah ke status 'kedaluwarsa' (hold habis)`);
+      if (expiredMidtrans.count > 0) {
+        console.log(`[CRON] ${expiredMidtrans.count} pesanan Midtrans diubah ke status 'kedaluwarsa' (hold 60m habis)`);
+      }
+
+      // 1b. Cash/QRIS (COD) yang hold-nya habis -> kedaluwarsa HANYA jika autoCancelEnabled aktif
+      if (autoCancelEnabled) {
+        const expiredCod = await prisma.order.updateMany({
+          where: {
+            paymentMethod: "cod",
+            status: "menunggu_bayar",
+            holdExpiresAt: { lt: now },
+          },
+          data: { status: "kedaluwarsa" },
+        });
+
+        if (expiredCod.count > 0) {
+          console.log(`[CRON] ${expiredCod.count} pesanan Cash/QRIS diubah ke status 'kedaluwarsa' (auto-cancel aktif)`);
+        }
       }
 
       // 2. Midtrans lunas yang lewat batas pengambilan -> lewat_batas_pengambilan

@@ -88,16 +88,15 @@ const getProductById = async (req, res, next) => {
         variantOptions: true,
         variants: true,
         story: true,
+        // F-14: Select aman — jangan bocorkan data order ke publik
         reviews: {
           where: { status: "tampil" },
-          include: {
-            orderItem: {
-              include: {
-                order: {
-                  include: { user: { select: { id: true, name: true, avatarUrl: true } } },
-                },
-              },
-            },
+          select: {
+            id: true,
+            rating: true,
+            comment: true,
+            createdAt: true,
+            user: { select: { id: true, name: true, avatarUrl: true } },
           },
         },
       },
@@ -203,13 +202,24 @@ const createProduct = async (req, res, next) => {
       // Buat baris ProductVariant per kombinasi
       for (const combo of combinations) {
         let stock = 0;
-        // Jika ada variantStocks dari body, cari stoknya
-        if (Array.isArray(variantStocks)) {
+        if (combo.length === 0 && req.body.stock !== undefined) {
+          const parsed = Number(req.body.stock);
+          if (Number.isInteger(parsed) && parsed >= 0) {
+            stock = parsed;
+          } else {
+            throw { status: 400, message: "Nilai stok harus berupa angka bulat non-negatif" };
+          }
+        } else if (Array.isArray(variantStocks)) {
           const matched = variantStocks.find(
             (vs) => JSON.stringify(vs.combination) === JSON.stringify(combo)
           );
-          if (matched && typeof matched.stock === "number") {
-            stock = matched.stock;
+          if (matched && matched.stock !== undefined) {
+            const parsed = Number(matched.stock);
+            if (Number.isInteger(parsed) && parsed >= 0) {
+              stock = parsed;
+            } else {
+              throw { status: 400, message: "Nilai stok varian harus berupa angka bulat non-negatif" };
+            }
           }
         }
 
@@ -230,6 +240,9 @@ const createProduct = async (req, res, next) => {
 
     res.status(201).json({ product: newProduct });
   } catch (err) {
+    if (err.status) {
+      return res.status(err.status).json({ error: err.message });
+    }
     next(err);
   }
 };
@@ -284,13 +297,21 @@ const updateProduct = async (req, res, next) => {
       });
 
       // Update stok varian jika diberikan ID varian dan stoknya
+      // F-03: cek productId agar kreator tidak bisa ubah varian milik produk lain
       if (Array.isArray(variantStocks)) {
         for (const vs of variantStocks) {
-          if (vs.id && typeof vs.stock === "number") {
-            await tx.productVariant.update({
-              where: { id: vs.id },
-              data: { stock: Math.max(0, vs.stock) },
+          if (vs.id && vs.stock !== undefined) {
+            const parsed = Number(vs.stock);
+            if (!Number.isInteger(parsed) || parsed < 0) {
+              throw { status: 400, message: "Nilai stok varian harus berupa angka bulat non-negatif" };
+            }
+            const result = await tx.productVariant.updateMany({
+              where: { id: vs.id, productId: id },
+              data: { stock: parsed },
             });
+            if (result.count !== 1) {
+              throw { status: 404, message: "Varian tidak ditemukan pada produk ini" };
+            }
           }
         }
       }

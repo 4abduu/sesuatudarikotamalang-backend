@@ -1,0 +1,38 @@
+# REST Client Smoke Test baseline untuk Sesuatu DariKota Malang Backend (Fase 13.8)
+# Jalankan menggunakan VS Code REST Client extension atau eksekusi via HTTP client / curl.
+
+@baseUrl = http://localhost:4000/api
+@adminEmail = {{adminEmail}}
+@adminPassword = {{adminPassword}}
+@buyerEmail = {{buyerEmail}}
+@buyerPassword = {{buyerPassword}}
+
+### 1. Healthcheck
+GET http://localhost:4000/
+Accept: application/json
+
+### 2. List Produk Publik
+GET {{baseUrl}}/products
+Accept: application/json
+
+### 3. Search / Detail Produk
+GET {{baseUrl}}/products?search=malang
+Accept: application/json
+
+### 4. Buyer Login
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{buyerEmail}}",
+  "password": "{{buyerPassword}}"
+}
+
+### 5. Admin Login
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{adminEmail}}",
+  "password": "{{adminPassword}}"
+}

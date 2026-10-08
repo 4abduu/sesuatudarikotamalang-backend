@@ -4,6 +4,26 @@ const cors = require("cors");
 const helmet = require("helmet");
 
 const path = require("path");
+
+// Fail-fast env check
+const requiredEnvs = ["DATABASE_URL", "JWT_SECRET"];
+if (process.env.NODE_ENV === "production") {
+  requiredEnvs.push("MIDTRANS_SERVER_KEY", "GOOGLE_CLIENT_ID", "RESEND_API_KEY", "CORS_ALLOWED_ORIGINS");
+}
+
+const missingEnvs = requiredEnvs.filter((env) => !process.env[env]);
+if (missingEnvs.length > 0) {
+  console.error(`[FATAL ERROR] Missing required environment variables: ${missingEnvs.join(", ")}`);
+  process.exit(1);
+}
+
+const optionalEnvs = ["MIDTRANS_SERVER_KEY", "RESEND_API_KEY", "GOOGLE_CLIENT_ID", "CORS_ALLOWED_ORIGINS"].filter(
+  (env) => !requiredEnvs.includes(env)
+);
+const missingOptionals = optionalEnvs.filter((env) => !process.env[env]);
+if (missingOptionals.length > 0) {
+  console.warn(`[WARNING] Optional environment variables not set: ${missingOptionals.join(", ")}`);
+}
 const authRoutes = require("./routes/auth.routes");
 const productsRoutes = require("./routes/products.routes");
 const ordersRoutes = require("./routes/orders.routes");
@@ -16,6 +36,12 @@ const searchRoutes = require("./routes/search.routes");
 const uploadRoutes = require("./routes/upload.routes");
 
 const app = express();
+
+// F-04: Trust proxy di belakang reverse proxy (Railway, Render, Nginx)
+if (process.env.TRUST_PROXY) {
+  const trustValue = process.env.TRUST_PROXY === "true" ? 1 : isNaN(Number(process.env.TRUST_PROXY)) ? process.env.TRUST_PROXY : Number(process.env.TRUST_PROXY);
+  app.set("trust proxy", trustValue);
+}
 
 // Helmet — Security HTTP headers (HSTS, noSniff, XSS filter, dll.)
 app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
@@ -37,7 +63,11 @@ app.use(
       if (allowedOrigins.length === 0) return callback(null, true);
       // Cek apakah origin ada di whitelist
       if (allowedOrigins.includes(origin)) return callback(null, true);
-      return callback(new Error("Blocked by CORS policy"));
+      
+      // F-11: Lempar error dengan status 403 agar tidak menjadi Internal Server Error 500
+      const err = new Error("Blocked by CORS policy");
+      err.status = 403;
+      return callback(err);
     },
     credentials: true,
   })
@@ -83,7 +113,25 @@ app.use((err, req, res, next) => {
     stack: process.env.NODE_ENV === "production" ? undefined : err.stack,
   });
 
-  res.status(err.status || 500).json({ error: err.message || "Internal server error" });
+  const statusCode = err.status || 500;
+  // F-11: Jangan bocorkan detail error internal DB / Prisma (status >= 500) di produksi
+  const responseMessage =
+    statusCode >= 500
+      ? process.env.NODE_ENV === "production"
+        ? "Terjadi kesalahan internal server"
+        : err.message || "Internal server error"
+      : err.message;
+
+  res.status(statusCode).json({ error: responseMessage });
+});
+
+// F-11: Handler unhandledRejection & uncaughtException
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("[UNHANDLED REJECTION]", reason);
+});
+
+process.on("uncaughtException", (error) => {
+  console.error("[UNCAUGHT EXCEPTION]", error);
 });
 
 const { startOrderStatusJob } = require("./jobs/orderStatusJob");

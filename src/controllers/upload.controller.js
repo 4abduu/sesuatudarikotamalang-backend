@@ -5,9 +5,11 @@ const uploadSingle = async (req, res, next) => {
       return res.status(400).json({ error: "Tidak ada file yang diunggah" });
     }
 
-    const host = req.get("host");
-    const protocol = req.protocol;
-    const fileUrl = `${protocol}://${host}/uploads/${req.file.filename}`;
+    const baseUrl = process.env.PUBLIC_BASE_URL
+      ? process.env.PUBLIC_BASE_URL.replace(/\/$/, "")
+      : `${req.protocol}://${req.get("host")}`;
+
+    const fileUrl = `${baseUrl}/uploads/${req.file.filename}`;
 
     res.json({
       message: "Upload file berhasil",
@@ -27,11 +29,12 @@ const uploadMultiple = async (req, res, next) => {
       return res.status(400).json({ error: "Tidak ada file yang diunggah" });
     }
 
-    const host = req.get("host");
-    const protocol = req.protocol;
+    const baseUrl = process.env.PUBLIC_BASE_URL
+      ? process.env.PUBLIC_BASE_URL.replace(/\/$/, "")
+      : `${req.protocol}://${req.get("host")}`;
 
     const uploadedFiles = req.files.map((file) => ({
-      url: `${protocol}://${host}/uploads/${file.filename}`,
+      url: `${baseUrl}/uploads/${file.filename}`,
       filename: file.filename,
       size: file.size,
       mimetype: file.mimetype,
