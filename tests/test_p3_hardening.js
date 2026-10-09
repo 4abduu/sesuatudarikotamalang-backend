@@ -6,7 +6,7 @@
  */
 
 const assert = require("assert");
-const { sendOtpEmail } = require("../src/lib/mailer");
+const { sendOtpEmail } = require("../dist/lib/mailer");
 
 async function runP3Tests() {
   console.log("\n==================================================");
@@ -51,7 +51,7 @@ async function runP3Tests() {
   // F-05: Upload MIME to Extension Mapping Check
   // ═══════════════════════════════════════════
   console.log("\n[F-05] Uji Penentuan Ekstensi Upload Berbasis MIME Whitelist");
-  const uploadLibPath = "../src/lib/upload";
+  const uploadLibPath = "../dist/lib/upload";
   delete require.cache[require.resolve(uploadLibPath)];
   const upload = require(uploadLibPath);
   testAssert(typeof upload === "object" && upload.single !== undefined, "Module upload multer berhasil dimuat");
@@ -60,7 +60,7 @@ async function runP3Tests() {
   // F-04: Upload Controller PUBLIC_BASE_URL Check
   // ═══════════════════════════════════════════
   console.log("\n[F-04] Uji PUBLIC_BASE_URL pada Upload Controller");
-  const { uploadSingle } = require("../src/controllers/upload.controller");
+  const { uploadSingle } = require("../dist/controllers/uploadController");
 
   process.env.PUBLIC_BASE_URL = "https://api.sesuatudarikotamalang.com";
   const mockReq = {

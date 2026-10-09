@@ -5,9 +5,9 @@ process.env.DATABASE_URL =
   "mysql://root:@localhost:3306/sesuatu_darikota_malang_test";
 
 const crypto = require("crypto");
-const prisma = require("../src/lib/prisma");
-const { handleWebhook } = require("../src/controllers/payments.controller");
-const { createOrder } = require("../src/controllers/orders.controller");
+const prisma = require("../dist/lib/prisma").default || require("../dist/lib/prisma");
+const { handleWebhook } = require("../dist/controllers/paymentsController");
+const { createOrder } = require("../dist/controllers/ordersController");
 
 // Helper Mock Express req/res/next
 function createMockReqRes(body, user = null) {

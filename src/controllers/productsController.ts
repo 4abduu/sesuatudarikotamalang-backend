@@ -1,9 +1,10 @@
-const prisma = require("../lib/prisma");
-const { cartesianProduct } = require("../lib/variants");
-const { attachEffectiveStockToVariants } = require("../lib/stock");
+import { Request, Response, NextFunction } from "express";
+import prisma from "../lib/prisma";
+import { cartesianProduct } from "../lib/variants";
+import { attachEffectiveStockToVariants } from "../lib/stock";
 
 // Helper untuk membuat slug sederhana dari nama produk
-function createSlug(name) {
+function createSlug(name: string): string {
   const base = name
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
@@ -13,17 +14,17 @@ function createSlug(name) {
 }
 
 // GET /api/products — list semua produk aktif (dukung filter categoryId, search, sort)
-const listProducts = async (req, res, next) => {
+export const listProducts = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { categoryId, search, sort } = req.query;
 
-    const where = { isActive: true };
+    const where: any = { isActive: true };
 
-    if (categoryId) {
+    if (typeof categoryId === "string") {
       where.categoryId = categoryId;
     }
 
-    if (search) {
+    if (typeof search === "string" && search.trim()) {
       const q = search.toLowerCase();
       where.OR = [
         { name: { contains: q } },
@@ -34,7 +35,7 @@ const listProducts = async (req, res, next) => {
       ];
     }
 
-    let orderBy = { createdAt: "desc" };
+    let orderBy: any = { createdAt: "desc" };
     if (sort === "termurah") orderBy = { price: "asc" };
     if (sort === "termahal") orderBy = { price: "desc" };
     if (sort === "terlaris") orderBy = { soldCount: "desc" };
@@ -70,7 +71,7 @@ const listProducts = async (req, res, next) => {
 };
 
 // GET /api/products/:id — detail satu produk (increment viewCount)
-const getProductById = async (req, res, next) => {
+export const getProductById = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
 
@@ -120,8 +121,12 @@ const getProductById = async (req, res, next) => {
 };
 
 // POST /api/products — Tambah produk (Creator / Admin)
-const createProduct = async (req, res, next) => {
+export const createProduct = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({ error: "Belum login" });
+    }
+
     const {
       name,
       categoryId,
@@ -140,7 +145,7 @@ const createProduct = async (req, res, next) => {
     }
 
     // Cari artisanId pengunggah
-    let artisanId;
+    let artisanId: string;
     if (req.user.role === "admin") {
       if (!req.body.artisanId) {
         return res.status(400).json({ error: "artisanId wajib diisi oleh Admin saat menambahkan produk" });
@@ -180,7 +185,7 @@ const createProduct = async (req, res, next) => {
       });
 
       // Simpan variantOptions jika ada
-      const savedOptions = [];
+      const savedOptions: any[] = [];
       if (Array.isArray(variantOptions) && variantOptions.length > 0) {
         for (let i = 0; i < variantOptions.length; i++) {
           const opt = variantOptions[i];
@@ -211,7 +216,7 @@ const createProduct = async (req, res, next) => {
           }
         } else if (Array.isArray(variantStocks)) {
           const matched = variantStocks.find(
-            (vs) => JSON.stringify(vs.combination) === JSON.stringify(combo)
+            (vs: any) => JSON.stringify(vs.combination) === JSON.stringify(combo)
           );
           if (matched && matched.stock !== undefined) {
             const parsed = Number(matched.stock);
@@ -239,7 +244,7 @@ const createProduct = async (req, res, next) => {
     });
 
     res.status(201).json({ product: newProduct });
-  } catch (err) {
+  } catch (err: any) {
     if (err.status) {
       return res.status(err.status).json({ error: err.message });
     }
@@ -248,8 +253,12 @@ const createProduct = async (req, res, next) => {
 };
 
 // PUT /api/products/:id — Edit produk (Creator pemilik produk / Admin)
-const updateProduct = async (req, res, next) => {
+export const updateProduct = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({ error: "Belum login" });
+    }
+
     const { id } = req.params;
     const existing = await prisma.product.findUnique({
       where: { id },
@@ -282,7 +291,7 @@ const updateProduct = async (req, res, next) => {
 
     const updated = await prisma.$transaction(async (tx) => {
       // Update data produk dasar
-      const prod = await tx.product.update({
+      await tx.product.update({
         where: { id },
         data: {
           ...(name && { name }),
@@ -329,7 +338,7 @@ const updateProduct = async (req, res, next) => {
 };
 
 // DELETE /api/products/:id — Soft Delete produk (Admin only)
-const deleteProduct = async (req, res, next) => {
+export const deleteProduct = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
     const existing = await prisma.product.findUnique({ where: { id } });
@@ -351,8 +360,12 @@ const deleteProduct = async (req, res, next) => {
 };
 
 // POST /api/products/:id/story — Tambah / Update cerita Behind the Design (Creator pemilik / Admin)
-const upsertStory = async (req, res, next) => {
+export const upsertStory = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({ error: "Belum login" });
+    }
+
     const { id } = req.params;
     const { title, content, coverImageUrl, processImages } = req.body;
 
@@ -395,7 +408,7 @@ const upsertStory = async (req, res, next) => {
   }
 };
 
-module.exports = {
+export default {
   listProducts,
   getProductById,
   createProduct,

@@ -1,7 +1,7 @@
-const express = require("express");
-const { requireAuth } = require("../middleware/auth");
-const { requireRole } = require("../middleware/requireRole");
-const productsController = require("../controllers/products.controller");
+import express from "express";
+import { requireAuth } from "../middleware/authMiddleware";
+import { requireRole } from "../middleware/requireRole";
+import productsController from "../controllers/productsController";
 
 const router = express.Router();
 
@@ -23,4 +23,4 @@ router.delete("/:id", requireAuth, requireRole("admin"), productsController.dele
 // POST /api/products/:id/story — Tambah / Update cerita Behind the Design (Creator pemilik / Admin)
 router.post("/:id/story", requireAuth, requireRole("creator", "admin"), productsController.upsertStory);
 
-module.exports = router;
+export default router;

@@ -1,12 +1,12 @@
-const express = require("express");
-const { requireAuth } = require("../middleware/auth");
-const {
+import express from "express";
+import { requireAuth } from "../middleware/authMiddleware";
+import {
   loginLimiter,
   otpRequestLimiter,
   otpVerifyLimiter,
   registerLimiter,
-} = require("../middleware/rateLimiter");
-const authController = require("../controllers/auth.controller");
+} from "../middleware/rateLimiter";
+import authController from "../controllers/authController";
 
 const router = express.Router();
 
@@ -37,4 +37,4 @@ router.post("/change-password", requireAuth, authController.changePassword);
 // GET /api/auth/me — Cek profil user yang sedang login
 router.get("/me", requireAuth, authController.getMe);
 
-module.exports = router;
+export default router;

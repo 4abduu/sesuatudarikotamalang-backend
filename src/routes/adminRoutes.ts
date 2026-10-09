@@ -1,7 +1,7 @@
-const express = require("express");
-const { requireAuth } = require("../middleware/auth");
-const { requireRole } = require("../middleware/requireRole");
-const adminController = require("../controllers/admin.controller");
+import express from "express";
+import { requireAuth } from "../middleware/authMiddleware";
+import { requireRole } from "../middleware/requireRole";
+import adminController from "../controllers/adminController";
 
 const router = express.Router();
 
@@ -47,4 +47,4 @@ router.delete("/reviews/:id", adminController.deleteReview);
 // PATCH /api/admin/artisans/:id/toggle-status — Ubah status aktif/nonaktif kreator
 router.patch("/artisans/:id/toggle-status", adminController.toggleArtisanStatus);
 
-module.exports = router;
+export default router;

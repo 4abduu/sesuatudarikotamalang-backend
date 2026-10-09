@@ -1,7 +1,7 @@
-const express = require("express");
-const { requireAuth } = require("../middleware/auth");
-const upload = require("../lib/upload");
-const uploadController = require("../controllers/upload.controller");
+import express, { Request, Response, NextFunction } from "express";
+import { requireAuth } from "../middleware/authMiddleware";
+import upload from "../lib/upload";
+import uploadController from "../controllers/uploadController";
 
 const router = express.Router();
 
@@ -9,8 +9,8 @@ const router = express.Router();
 router.post(
   "/single",
   requireAuth,
-  (req, res, next) => {
-    upload.single("file")(req, res, (err) => {
+  (req: Request, res: Response, next: NextFunction) => {
+    upload.single("file")(req, res, (err: any) => {
       if (err) {
         return res.status(400).json({ error: err.message });
       }
@@ -24,8 +24,8 @@ router.post(
 router.post(
   "/multiple",
   requireAuth,
-  (req, res, next) => {
-    upload.array("files", 5)(req, res, (err) => {
+  (req: Request, res: Response, next: NextFunction) => {
+    upload.array("files", 5)(req, res, (err: any) => {
       if (err) {
         return res.status(400).json({ error: err.message });
       }
@@ -35,4 +35,4 @@ router.post(
   uploadController.uploadMultiple
 );
 
-module.exports = router;
+export default router;

@@ -1,6 +1,6 @@
-const express = require("express");
-const { requireAuth } = require("../middleware/auth");
-const ordersController = require("../controllers/orders.controller");
+import express from "express";
+import { requireAuth } from "../middleware/authMiddleware";
+import ordersController from "../controllers/ordersController";
 
 const router = express.Router();
 
@@ -16,4 +16,4 @@ router.post("/", requireAuth, ordersController.createOrder);
 // PATCH /api/orders/:id/cancel — Pembatalan manual (Buyer hanya bisa batalkan order milik sendiri yang belum lunas)
 router.patch("/:id/cancel", requireAuth, ordersController.cancelOrder);
 
-module.exports = router;
+export default router;

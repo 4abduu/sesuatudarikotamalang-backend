@@ -1,6 +1,6 @@
 # Sesuatu DariKota Malang — Backend API
 
-Backend API berbasis Express.js, Prisma ORM, dan MySQL untuk platform **Sesuatu DariKota Malang**.
+Backend API berbasis Express.js, TypeScript, Prisma ORM, dan MySQL untuk platform **Sesuatu DariKota Malang**.
 
 ## Setup Pertama Kali
 
@@ -21,9 +21,12 @@ Backend API berbasis Express.js, Prisma ORM, dan MySQL untuk platform **Sesuatu 
    ```bash
    npm run prisma:migrate
    ```
-5. Jalankan server pengembangan:
+5. Jalankan server pengembangan atau build:
    ```bash
-   npm run dev
+   npm run dev        # Menjalankan dengan tsx watch (TypeScript live-reload)
+   npm run typecheck  # Menjalankan tsc --noEmit
+   npm run build      # Generates Prisma client & kompilasi ke dist/
+   npm start          # Menjalankan dari dist/server.js
    ```
    Server akan berjalan di `http://localhost:4000`. Akses `GET /` untuk memastikan server aktif `{ "status": "ok", ... }`.
 
@@ -31,12 +34,14 @@ Backend API berbasis Express.js, Prisma ORM, dan MySQL untuk platform **Sesuatu 
 
 ```
 src/
-├── index.js              # Entry point aplikasi & fail-fast env check
-├── lib/                  # Module helper (prisma.js, stock.js, midtrans.js)
-├── middleware/           # auth.js (JWT verifier), requireRole.js, rateLimiter.js
+├── app.ts                # Konfigurasi Express, middleware, routing & error handling
+├── server.ts             # Entry point server (listen port & start cron job)
+├── lib/                  # Module helper (prisma.ts, stock.ts, midtrans.ts, mailer.ts, upload.ts)
+├── middleware/           # auth.ts (JWT verifier), requireRole.ts, rateLimiter.ts
 ├── routes/               # Express router (auth, products, orders, payments, admin, dll.)
 ├── controllers/          # Business logic handlers
-└── jobs/                 # Cron jobs (orderStatusJob.js)
+├── types/                # Type definitions custom (.d.ts)
+└── jobs/                 # Cron jobs (orderStatusJob.ts)
 ```
 
 ## Endpoint API Utama

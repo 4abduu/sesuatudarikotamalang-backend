@@ -12,9 +12,9 @@ if (!dbUrl.includes("_test")) {
   process.exit(1);
 }
 
-const prisma = require("../src/lib/prisma");
-const { createOrder, cancelOrder } = require("../src/controllers/orders.controller");
-const { verifyScanQr } = require("../src/controllers/admin.controller");
+const prisma = require("../dist/lib/prisma").default || require("../dist/lib/prisma");
+const { createOrder, cancelOrder } = require("../dist/controllers/ordersController");
+const { verifyScanQr } = require("../dist/controllers/adminController");
 
 function mockRes() {
   const res = {

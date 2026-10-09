@@ -1,7 +1,8 @@
-const prisma = require("../lib/prisma");
+import { Request, Response, NextFunction } from "express";
+import prisma from "../lib/prisma";
 
 // GET /api/admin/dashboard — ringkasan statcard + data grafik dashboard admin
-const getDashboard = async (req, res, next) => {
+export const getDashboard = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
@@ -77,11 +78,11 @@ const getDashboard = async (req, res, next) => {
 };
 
 // GET /api/admin/applications — Daftar pengajuan konsinyasi (filter status: pending/diterima/ditolak)
-const listApplications = async (req, res, next) => {
+export const listApplications = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { status } = req.query;
-    const where = {};
-    if (status) {
+    const where: any = {};
+    if (typeof status === "string") {
       where.status = status;
     }
 
@@ -101,7 +102,7 @@ const listApplications = async (req, res, next) => {
 };
 
 // POST /api/admin/applications/:id/approve — Setujui pengajuan konsinyasi (Transaction)
-const approveApplication = async (req, res, next) => {
+export const approveApplication = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
 
@@ -170,7 +171,7 @@ const approveApplication = async (req, res, next) => {
 };
 
 // POST /api/admin/applications/:id/reject — Tolak pengajuan konsinyasi
-const rejectApplication = async (req, res, next) => {
+export const rejectApplication = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
     const { reason } = req.body;
@@ -220,16 +221,16 @@ const rejectApplication = async (req, res, next) => {
 };
 
 // GET /api/admin/orders — Daftar seluruh pesanan untuk admin
-const listOrders = async (req, res, next) => {
+export const listOrders = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { status, search } = req.query;
-    const where = {};
+    const where: any = {};
 
-    if (status) {
+    if (typeof status === "string") {
       where.status = status;
     }
 
-    if (search) {
+    if (typeof search === "string" && search.trim()) {
       where.OR = [
         { orderNumber: { contains: search } },
         { user: { name: { contains: search } } },
@@ -254,7 +255,7 @@ const listOrders = async (req, res, next) => {
 };
 
 // PATCH /api/admin/orders/:id/status — Admin ubah status order secara manual
-const updateOrderStatus = async (req, res, next) => {
+export const updateOrderStatus = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
@@ -333,7 +334,7 @@ const updateOrderStatus = async (req, res, next) => {
 };
 
 // PATCH /api/admin/orders/:id/extend-hold — Admin perpanjang waktu hold pesanan Cash/QRIS
-const extendOrderHold = async (req, res, next) => {
+export const extendOrderHold = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
     const { additionalMinutes } = req.body;
@@ -384,10 +385,10 @@ const extendOrderHold = async (req, res, next) => {
 };
 
 // POST /api/admin/scan-qr/verify — Verifikasi pickup via Scan QR Kamera Browser / Input Manual Kode Order (SDK-XXXX)
-const verifyScanQr = async (req, res, next) => {
+export const verifyScanQr = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { orderNumber } = req.body;
-    if (!orderNumber || !orderNumber.trim()) {
+    if (!orderNumber || typeof orderNumber !== "string" || !orderNumber.trim()) {
       return res.status(400).json({ error: "orderNumber wajib diisi" });
     }
 
@@ -411,6 +412,10 @@ const verifyScanQr = async (req, res, next) => {
             items: { include: { product: true, variant: true } },
           },
         });
+
+        if (!order) {
+          throw { status: 404, message: "Pesanan tidak ditemukan" };
+        }
 
         if (order.status === "selesai") {
           throw { status: 400, message: "Pesanan ini sudah pernah diambil (status: Selesai)", order };
@@ -457,7 +462,7 @@ const verifyScanQr = async (req, res, next) => {
       message: "Verifikasi pickup berhasil! Pesanan telah ditandai Selesai",
       order: updatedOrder,
     });
-  } catch (err) {
+  } catch (err: any) {
     if (err.status) {
       return res.status(err.status).json({ error: err.message, order: err.order });
     }
@@ -466,7 +471,7 @@ const verifyScanQr = async (req, res, next) => {
 };
 
 // GET /api/admin/settings — Ambil pengaturan sistem (AppSettings singleton id: 1)
-const getSettings = async (req, res, next) => {
+export const getSettings = async (req: Request, res: Response, next: NextFunction) => {
   try {
     let settings = await prisma.appSettings.findUnique({ where: { id: 1 } });
     if (!settings) {
@@ -479,7 +484,7 @@ const getSettings = async (req, res, next) => {
 };
 
 // PUT /api/admin/settings — Update pengaturan sistem (AppSettings)
-const updateSettings = async (req, res, next) => {
+export const updateSettings = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { holdDurationMinutes, autoCancelEnabled, pickupDeadlineDays, whatsappAdminNumber, notificationEmail } = req.body;
 
@@ -509,7 +514,7 @@ const updateSettings = async (req, res, next) => {
 };
 
 // PATCH /api/admin/reviews/:id/hide — Sembunyikan / Tampilkan ulasan
-const toggleReviewHide = async (req, res, next) => {
+export const toggleReviewHide = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
     const review = await prisma.review.findUnique({ where: { id } });
@@ -531,7 +536,7 @@ const toggleReviewHide = async (req, res, next) => {
 };
 
 // DELETE /api/admin/reviews/:id — Hapus ulasan tidak pantas
-const deleteReview = async (req, res, next) => {
+export const deleteReview = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
     const review = await prisma.review.findUnique({ where: { id } });
@@ -548,7 +553,7 @@ const deleteReview = async (req, res, next) => {
 };
 
 // PATCH /api/admin/artisans/:id/toggle-status — Ubah status aktif/nonaktif kreator
-const toggleArtisanStatus = async (req, res, next) => {
+export const toggleArtisanStatus = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
     const artisan = await prisma.artisan.findUnique({ where: { id } });
@@ -569,7 +574,7 @@ const toggleArtisanStatus = async (req, res, next) => {
   }
 };
 
-module.exports = {
+export default {
   getDashboard,
   listApplications,
   approveApplication,

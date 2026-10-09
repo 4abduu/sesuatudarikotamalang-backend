@@ -1,6 +1,6 @@
-const express = require("express");
-const { requireAuth } = require("../middleware/auth");
-const notificationsController = require("../controllers/notifications.controller");
+import express from "express";
+import { requireAuth } from "../middleware/authMiddleware";
+import notificationsController from "../controllers/notificationsController";
 
 const router = express.Router();
 
@@ -13,4 +13,4 @@ router.patch("/:id/read", requireAuth, notificationsController.markAsRead);
 // PATCH /api/notifications/read-all — Tandai seluruh notifikasi user sebagai sudah dibaca
 router.patch("/read-all", requireAuth, notificationsController.markAllAsRead);
 
-module.exports = router;
+export default router;

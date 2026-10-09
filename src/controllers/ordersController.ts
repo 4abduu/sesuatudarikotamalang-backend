@@ -1,9 +1,15 @@
-const prisma = require("../lib/prisma");
-const { effectiveStock } = require("../lib/stock");
+import { Request, Response, NextFunction } from "express";
+import prisma from "../lib/prisma";
+import { effectiveStock } from "../lib/stock";
+import { snap } from "../lib/midtrans";
 
 // GET /api/orders — Riwayat pesanan milik user yang sedang login
-const listOrders = async (req, res, next) => {
+export const listOrders = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({ error: "Belum login" });
+    }
+
     const orders = await prisma.order.findMany({
       where: { userId: req.user.id },
       include: {
@@ -26,8 +32,12 @@ const listOrders = async (req, res, next) => {
 };
 
 // GET /api/orders/:id — Detail 1 pesanan (hanya pemilik order atau admin)
-const getOrderById = async (req, res, next) => {
+export const getOrderById = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({ error: "Belum login" });
+    }
+
     const { id } = req.params;
 
     const order = await prisma.order.findUnique({
@@ -62,8 +72,12 @@ const getOrderById = async (req, res, next) => {
 };
 
 // POST /api/orders — Buat order/reservasi baru (Atomic Transaction & Atomic Stock Check)
-const createOrder = async (req, res, next) => {
+export const createOrder = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({ error: "Belum login" });
+    }
+
     const { productId, variantId, pickupDate, pickupSlot, paymentMethod } = req.body;
 
     if (!productId || !pickupDate || !pickupSlot || !paymentMethod) {
@@ -75,6 +89,8 @@ const createOrder = async (req, res, next) => {
     if (!["midtrans", "cod"].includes(paymentMethod)) {
       return res.status(400).json({ error: "paymentMethod harus 'midtrans' atau 'cod'" });
     }
+
+    const userId = req.user.id;
 
     // Pengecekan dan pembuatan order dilakukan dalam SATU transaksi database (Atomic)
     const newOrder = await prisma.$transaction(
@@ -93,12 +109,12 @@ const createOrder = async (req, res, next) => {
       }
 
       // 2. Validasi larangan membeli produk sendiri
-      if (product.artisan?.userId === req.user.id) {
+      if (product.artisan?.userId === userId) {
         throw { status: 403, message: "Kamu tidak bisa membeli produkmu sendiri" };
       }
 
       // 3. Validasi Varian & Stok Efektif (Atomic Check)
-      let variant = null;
+      let variant: any = null;
       if (product.variantOptions && product.variantOptions.length > 0) {
         if (!variantId) {
           throw { status: 400, message: "Produk ini memiliki varian. Pilih varian terlebih dahulu" };
@@ -165,7 +181,7 @@ const createOrder = async (req, res, next) => {
       const createdOrder = await tx.order.create({
         data: {
           orderNumber,
-          userId: req.user.id,
+          userId,
           paymentMethod,
           status: "menunggu_bayar", // Berstatus awal menunggu_bayar baik COD maupun Midtrans
           totalAmount: product.price,
@@ -193,10 +209,9 @@ const createOrder = async (req, res, next) => {
     }, { isolationLevel: "ReadCommitted" });
 
     // Jika paymentMethod === "midtrans", buat Snap Transaction Token
-    let snapResponse = null;
+    let snapResponse: any = null;
     if (paymentMethod === "midtrans") {
       try {
-        const { snap } = require("../lib/midtrans");
         const user = await prisma.user.findUnique({ where: { id: req.user.id } });
 
         const transactionDetails = {
@@ -236,7 +251,7 @@ const createOrder = async (req, res, next) => {
     }
 
     res.status(201).json({ order: newOrder, snap: snapResponse });
-  } catch (err) {
+  } catch (err: any) {
     if (err.status) {
       return res.status(err.status).json({ error: err.message });
     }
@@ -245,8 +260,12 @@ const createOrder = async (req, res, next) => {
 };
 
 // PATCH /api/orders/:id/cancel — Pembatalan manual (Buyer hanya bisa batalkan order milik sendiri yang belum lunas)
-const cancelOrder = async (req, res, next) => {
+export const cancelOrder = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({ error: "Belum login" });
+    }
+
     const { id } = req.params;
 
     const order = await prisma.order.findUnique({ where: { id } });
@@ -279,7 +298,7 @@ const cancelOrder = async (req, res, next) => {
   }
 };
 
-module.exports = {
+export default {
   listOrders,
   getOrderById,
   createOrder,

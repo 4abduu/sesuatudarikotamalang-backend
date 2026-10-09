@@ -1,9 +1,8 @@
-require("dotenv").config();
-const express = require("express");
-const cors = require("cors");
-const helmet = require("helmet");
-
-const path = require("path");
+import "dotenv/config";
+import express, { Request, Response, NextFunction } from "express";
+import cors from "cors";
+import helmet from "helmet";
+import path from "path";
 
 // Fail-fast env check
 const requiredEnvs = ["DATABASE_URL", "JWT_SECRET"];
@@ -24,16 +23,17 @@ const missingOptionals = optionalEnvs.filter((env) => !process.env[env]);
 if (missingOptionals.length > 0) {
   console.warn(`[WARNING] Optional environment variables not set: ${missingOptionals.join(", ")}`);
 }
-const authRoutes = require("./routes/auth.routes");
-const productsRoutes = require("./routes/products.routes");
-const ordersRoutes = require("./routes/orders.routes");
-const artisansRoutes = require("./routes/artisans.routes");
-const reviewsRoutes = require("./routes/reviews.routes");
-const adminRoutes = require("./routes/admin.routes");
-const paymentsRoutes = require("./routes/payments.routes");
-const notificationsRoutes = require("./routes/notifications.routes");
-const searchRoutes = require("./routes/search.routes");
-const uploadRoutes = require("./routes/upload.routes");
+
+import authRoutes from "./routes/authRoutes";
+import productsRoutes from "./routes/productsRoutes";
+import ordersRoutes from "./routes/ordersRoutes";
+import artisansRoutes from "./routes/artisansRoutes";
+import reviewsRoutes from "./routes/reviewsRoutes";
+import adminRoutes from "./routes/adminRoutes";
+import paymentsRoutes from "./routes/paymentsRoutes";
+import notificationsRoutes from "./routes/notificationsRoutes";
+import searchRoutes from "./routes/searchRoutes";
+import uploadRoutes from "./routes/uploadRoutes";
 
 const app = express();
 
@@ -65,7 +65,7 @@ app.use(
       if (allowedOrigins.includes(origin)) return callback(null, true);
       
       // F-11: Lempar error dengan status 403 agar tidak menjadi Internal Server Error 500
-      const err = new Error("Blocked by CORS policy");
+      const err: any = new Error("Blocked by CORS policy");
       err.status = 403;
       return callback(err);
     },
@@ -76,7 +76,7 @@ app.use(
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.get("/", (req, res) => {
+app.get("/", (_req: Request, res: Response) => {
   res.json({ status: "ok", message: "Sesuatu DariKota Malang API is running" });
 });
 
@@ -92,12 +92,12 @@ app.use("/api/search", searchRoutes);
 app.use("/api/upload", uploadRoutes);
 
 // 404 handler
-app.use((req, res) => {
+app.use((_req: Request, res: Response) => {
   res.status(404).json({ error: "Route not found" });
 });
 
 // Error handler — jangan pernah log password atau token ke console
-app.use((err, req, res, next) => {
+app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
   // Sanitasi: hapus field sensitif dari body sebelum log
   const sanitizedBody = req.body ? { ...req.body } : {};
   const sensitiveFields = ["password", "oldPassword", "newPassword", "token", "idToken", "code"];
@@ -126,7 +126,7 @@ app.use((err, req, res, next) => {
 });
 
 // F-11: Handler unhandledRejection & uncaughtException
-process.on("unhandledRejection", (reason, promise) => {
+process.on("unhandledRejection", (reason) => {
   console.error("[UNHANDLED REJECTION]", reason);
 });
 
@@ -134,11 +134,4 @@ process.on("uncaughtException", (error) => {
   console.error("[UNCAUGHT EXCEPTION]", error);
 });
 
-const { startOrderStatusJob } = require("./jobs/orderStatusJob");
-
-const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => {
-  console.log(`Server jalan di http://localhost:${PORT}`);
-  startOrderStatusJob();
-});
-
+export default app;

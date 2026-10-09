@@ -1,6 +1,6 @@
-const express = require("express");
-const { requireAuth } = require("../middleware/auth");
-const artisansController = require("../controllers/artisans.controller");
+import express from "express";
+import { requireAuth } from "../middleware/authMiddleware";
+import artisansController from "../controllers/artisansController";
 
 const router = express.Router();
 
@@ -19,4 +19,4 @@ router.get("/:id", artisansController.getArtisanById);
 // POST /api/artisans/apply — ajukan pendaftaran konsinyasi (butuh login)
 router.post("/apply", requireAuth, artisansController.applyConsignment);
 
-module.exports = router;
+export default router;

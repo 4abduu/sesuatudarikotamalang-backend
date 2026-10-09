@@ -18,11 +18,11 @@ if (!dbUrl.includes("_test")) {
 }
 process.env.DATABASE_URL = dbUrl;
 
-const prisma = require("../src/lib/prisma");
-const { forgotPasswordVerify, changeEmailVerify, googleLogin } = require("../src/controllers/auth.controller");
-const { updateProduct, getProductById } = require("../src/controllers/products.controller");
-const { applyConsignment } = require("../src/controllers/artisans.controller");
-const { approveApplication } = require("../src/controllers/admin.controller");
+const prisma = require("../dist/lib/prisma").default || require("../dist/lib/prisma");
+const { forgotPasswordVerify, changeEmailVerify, googleLogin } = require("../dist/controllers/authController");
+const { updateProduct, getProductById } = require("../dist/controllers/productsController");
+const { applyConsignment } = require("../dist/controllers/artisansController");
+const { approveApplication } = require("../dist/controllers/adminController");
 
 // ──────────────────────────────────────────
 // Helper: mock Express req/res/next

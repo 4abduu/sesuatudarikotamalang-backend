@@ -1,6 +1,6 @@
-const express = require("express");
-const { requireAuth } = require("../middleware/auth");
-const reviewsController = require("../controllers/reviews.controller");
+import express from "express";
+import { requireAuth } from "../middleware/authMiddleware";
+import reviewsController from "../controllers/reviewsController";
 
 const router = express.Router();
 
@@ -10,4 +10,4 @@ router.get("/", reviewsController.listReviews);
 // POST /api/reviews — Tambah ulasan baru (butuh login, wajib terikat pesanan yang sudah selesai)
 router.post("/", requireAuth, reviewsController.createReview);
 
-module.exports = router;
+export default router;

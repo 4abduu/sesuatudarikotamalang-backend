@@ -1,15 +1,16 @@
-const bcrypt = require("bcrypt");
-const crypto = require("crypto");
-const jwt = require("jsonwebtoken");
-const { OAuth2Client } = require("google-auth-library");
-const prisma = require("../lib/prisma");
-const { validatePassword } = require("../lib/validatePassword");
-const { sendOtpEmail } = require("../lib/mailer");
+import { Request, Response, NextFunction } from "express";
+import bcrypt from "bcrypt";
+import crypto from "crypto";
+import jwt from "jsonwebtoken";
+import { OAuth2Client } from "google-auth-library";
+import prisma from "../lib/prisma";
+import { validatePassword } from "../lib/validatePassword";
+import { sendOtpEmail } from "../lib/mailer";
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 // POST /api/auth/register
-const register = async (req, res, next) => {
+export const register = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { name, email, password } = req.body;
     if (!name || !email || !password) {
@@ -35,7 +36,7 @@ const register = async (req, res, next) => {
       data: { name, email, passwordHash, role: "buyer" },
     });
 
-    const token = jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET, {
+    const token = jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET || "", {
       expiresIn: "7d",
     });
 
@@ -49,7 +50,7 @@ const register = async (req, res, next) => {
 };
 
 // POST /api/auth/login
-const login = async (req, res, next) => {
+export const login = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) {
@@ -77,7 +78,7 @@ const login = async (req, res, next) => {
       return res.status(401).json({ error: "Email atau password salah" });
     }
 
-    const token = jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET, {
+    const token = jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET || "", {
       expiresIn: "7d",
     });
 
@@ -91,7 +92,7 @@ const login = async (req, res, next) => {
 };
 
 // POST /api/auth/google — Login / Register via Google Sign-In Mobile
-const googleLogin = async (req, res, next) => {
+export const googleLogin = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { idToken } = req.body;
     if (!idToken) {
@@ -103,7 +104,7 @@ const googleLogin = async (req, res, next) => {
       return res.status(503).json({ error: "Google login belum dikonfigurasi" });
     }
 
-    let payload;
+    let payload: any;
     try {
       const ticket = await googleClient.verifyIdToken({
         idToken,
@@ -115,7 +116,7 @@ const googleLogin = async (req, res, next) => {
     }
 
     // F-10: Tolak jika email belum diverifikasi oleh Google
-    if (payload.email_verified !== true) {
+    if (!payload || payload.email_verified !== true) {
       return res.status(403).json({ error: "Email Google belum diverifikasi" });
     }
 
@@ -145,7 +146,7 @@ const googleLogin = async (req, res, next) => {
       });
     }
 
-    const token = jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET, {
+    const token = jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET || "", {
       expiresIn: "7d",
     });
 
@@ -159,7 +160,7 @@ const googleLogin = async (req, res, next) => {
 };
 
 // POST /api/auth/forgot-password/request — Minta OTP Reset Password
-const forgotPasswordRequest = async (req, res, next) => {
+export const forgotPasswordRequest = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { email } = req.body;
     if (!email || typeof email !== "string") {
@@ -198,7 +199,7 @@ const forgotPasswordRequest = async (req, res, next) => {
 };
 
 // POST /api/auth/forgot-password/verify — Verifikasi OTP & Reset Password
-const forgotPasswordVerify = async (req, res, next) => {
+export const forgotPasswordVerify = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { email, code, newPassword } = req.body;
     // F-01: Validasi tipe ketat — cegah injeksi operator Prisma
@@ -263,8 +264,12 @@ const forgotPasswordVerify = async (req, res, next) => {
 };
 
 // POST /api/auth/change-email/request (butuh requireAuth) — Minta OTP Ganti Email
-const changeEmailRequest = async (req, res, next) => {
+export const changeEmailRequest = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({ error: "Belum login" });
+    }
+
     const { newEmail } = req.body;
     if (!newEmail || typeof newEmail !== "string") {
       return res.status(400).json({ error: "newEmail wajib diisi" });
@@ -307,8 +312,12 @@ const changeEmailRequest = async (req, res, next) => {
 };
 
 // POST /api/auth/change-email/verify (butuh requireAuth) — Verifikasi OTP Ganti Email
-const changeEmailVerify = async (req, res, next) => {
+export const changeEmailVerify = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({ error: "Belum login" });
+    }
+
     const { code } = req.body;
     // F-01: Validasi tipe ketat — cegah injeksi operator Prisma
     if (typeof code !== "string" || !code) {
@@ -353,8 +362,12 @@ const changeEmailVerify = async (req, res, next) => {
 };
 
 // POST /api/auth/change-password (butuh requireAuth) — Ganti Password dari Pengaturan
-const changePassword = async (req, res, next) => {
+export const changePassword = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({ error: "Belum login" });
+    }
+
     const { oldPassword, newPassword } = req.body;
     if (!oldPassword || !newPassword) {
       return res.status(400).json({ error: "oldPassword dan newPassword wajib diisi" });
@@ -397,8 +410,12 @@ const changePassword = async (req, res, next) => {
 };
 
 // GET /api/auth/me — Cek profil user yang sedang login
-const getMe = async (req, res, next) => {
+export const getMe = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({ error: "Belum login" });
+    }
+
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
       select: { id: true, name: true, email: true, role: true, avatarUrl: true },
@@ -409,7 +426,7 @@ const getMe = async (req, res, next) => {
   }
 };
 
-module.exports = {
+export default {
   register,
   login,
   googleLogin,
