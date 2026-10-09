@@ -1,8 +1,13 @@
-const prisma = require("../lib/prisma");
+import { Request, Response, NextFunction } from "express";
+import prisma from "../lib/prisma";
 
 // GET /api/artisans/applications/mine — Cek status pengajuan konsinyasi milik user yang login (Daftarkan sebelum /:id)
-const getMyApplications = async (req, res, next) => {
+export const getMyApplications = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({ error: "Belum login" });
+    }
+
     const applications = await prisma.artisanApplication.findMany({
       where: { userId: req.user.id },
       orderBy: { submittedAt: "desc" },
@@ -15,8 +20,12 @@ const getMyApplications = async (req, res, next) => {
 };
 
 // PUT /api/artisans/mine — Update profil kreator (bio, avatarUrl, brandName) oleh kreator sendiri (Daftarkan sebelum /:id)
-const updateMyProfile = async (req, res, next) => {
+export const updateMyProfile = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({ error: "Belum login" });
+    }
+
     const artisan = await prisma.artisan.findUnique({ where: { userId: req.user.id } });
     if (!artisan) {
       return res.status(404).json({ error: "Profil kreator tidak ditemukan" });
@@ -39,7 +48,7 @@ const updateMyProfile = async (req, res, next) => {
 };
 
 // GET /api/artisans — daftar kreator aktif
-const listArtisans = async (req, res, next) => {
+export const listArtisans = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const artisans = await prisma.artisan.findMany({
       where: { status: "aktif" },
@@ -54,7 +63,7 @@ const listArtisans = async (req, res, next) => {
 };
 
 // GET /api/artisans/:id — profil + karya kreator (hanya jika aktif dan produk aktif)
-const getArtisanById = async (req, res, next) => {
+export const getArtisanById = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const artisan = await prisma.artisan.findFirst({
       where: { id: req.params.id, status: "aktif" },
@@ -73,8 +82,12 @@ const getArtisanById = async (req, res, next) => {
 };
 
 // POST /api/artisans/apply — ajukan pendaftaran konsinyasi (butuh login)
-const applyConsignment = async (req, res, next) => {
+export const applyConsignment = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({ error: "Belum login" });
+    }
+
     const { applicantName, contact, brandName, categoryId, description, sampleFileUrl } = req.body;
 
     if (!applicantName || !contact || !brandName || !description) {
@@ -120,7 +133,7 @@ const applyConsignment = async (req, res, next) => {
   }
 };
 
-module.exports = {
+export default {
   getMyApplications,
   updateMyProfile,
   listArtisans,

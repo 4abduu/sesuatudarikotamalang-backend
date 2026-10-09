@@ -1,4 +1,4 @@
-const { Resend } = require("resend");
+import { Resend } from "resend";
 
 /* ------------------------------------------------------------------ */
 /* Brand tokens (mirror globals.css so email matches the app)         */
@@ -23,7 +23,7 @@ const BRAND_NAME = "Sesuatu DariKota Malang";
 /* Inline SVG ornaments                                                */
 /* ------------------------------------------------------------------ */
 
-function LeafSprigSvg() {
+function LeafSprigSvg(): string {
   return `
     <svg width="36" height="36" viewBox="0 0 120 120" fill="none"
          stroke="${BRAND.primaryForeground}" stroke-width="2"
@@ -39,7 +39,7 @@ function LeafSprigSvg() {
     </svg>`;
 }
 
-function HeritageWindowSvg() {
+function HeritageWindowSvg(): string {
   return `
     <svg width="28" height="28" viewBox="0 0 120 120" fill="none"
          stroke="${BRAND.accent}" stroke-width="2"
@@ -56,7 +56,7 @@ function HeritageWindowSvg() {
 /* HTML escape                                                         */
 /* ------------------------------------------------------------------ */
 
-function escapeHtml(input) {
+function escapeHtml(input: string): string {
   return input
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -69,7 +69,16 @@ function escapeHtml(input) {
 /* Copy variants                                                       */
 /* ------------------------------------------------------------------ */
 
-function copyFor(purpose) {
+export type OtpPurpose = "ganti_email" | "reset_password" | string;
+
+export interface CopyVariant {
+  subject: string;
+  eyebrow: string;
+  title: string;
+  desc: string;
+}
+
+function copyFor(purpose: OtpPurpose): CopyVariant {
   if (purpose === "ganti_email") {
     return {
       subject: `Kode Verifikasi Ganti Email — ${BRAND_NAME}`,
@@ -90,7 +99,7 @@ function copyFor(purpose) {
 /* Build branded OTP HTML                                              */
 /* ------------------------------------------------------------------ */
 
-function buildOtpHtml(code, purpose) {
+function buildOtpHtml(code: string, purpose: OtpPurpose): string {
   const copy = copyFor(purpose);
 
   return `
@@ -246,7 +255,7 @@ function buildOtpHtml(code, purpose) {
 /**
  * Mengirimkan email OTP (Reset Password atau Ganti Email) via Resend API
  */
-async function sendOtpEmail(to, code, purpose) {
+export async function sendOtpEmail(to: string, code: string, purpose: OtpPurpose): Promise<{ id: string } | unknown> {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
     console.warn("[WARN] RESEND_API_KEY belum diisi di .env. Email OTP tidak benar-benar dikirim.");
@@ -279,4 +288,4 @@ async function sendOtpEmail(to, code, purpose) {
   return result.data;
 }
 
-module.exports = { sendOtpEmail };
+export default { sendOtpEmail };

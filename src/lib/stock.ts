@@ -1,4 +1,5 @@
-const prisma = require("./prisma");
+import prisma from "./prisma";
+import { Prisma } from "@prisma/client";
 
 /**
  * Hitung stok efektif satu variant:
@@ -6,11 +7,11 @@ const prisma = require("./prisma");
  * - lunas
  * - selesai
  * - menunggu_bayar yang belum kedaluwarsa (holdExpiresAt > now)
- *
- * @param {string} variantId
- * @returns {Promise<number>}
  */
-async function effectiveStock(variantId, tx = prisma) {
+export async function effectiveStock(
+  variantId: string,
+  tx: Prisma.TransactionClient | typeof prisma = prisma
+): Promise<number> {
   const variant = await tx.productVariant.findUnique({
     where: { id: variantId },
   });
@@ -22,7 +23,7 @@ async function effectiveStock(variantId, tx = prisma) {
   const settings = await tx.appSettings.findUnique({ where: { id: 1 } });
   const autoCancelEnabled = settings?.autoCancelEnabled ?? true;
 
-  const activeOrderConditions = [
+  const activeOrderConditions: any[] = [
     { status: "lunas" },
     { status: "selesai" },
     { status: "lewat_batas_pengambilan" },
@@ -64,10 +65,10 @@ async function effectiveStock(variantId, tx = prisma) {
 
 /**
  * Tempelkan informasi stok efektif ke array variant produk
- * @param {Array} variants
- * @returns {Promise<Array>}
  */
-async function attachEffectiveStockToVariants(variants) {
+export async function attachEffectiveStockToVariants<T extends { id: string }>(
+  variants: T[]
+): Promise<(T & { effectiveStock: number })[]> {
   if (!variants || variants.length === 0) return [];
   return Promise.all(
     variants.map(async (v) => {
@@ -79,5 +80,3 @@ async function attachEffectiveStockToVariants(variants) {
     })
   );
 }
-
-module.exports = { effectiveStock, attachEffectiveStockToVariants };

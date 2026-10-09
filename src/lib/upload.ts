@@ -1,6 +1,7 @@
-const multer = require("multer");
-const path = require("path");
-const fs = require("fs");
+import multer from "multer";
+import path from "path";
+import fs from "fs";
+import { Request } from "express";
 
 const uploadDir = path.join(__dirname, "../../uploads");
 
@@ -10,7 +11,7 @@ if (!fs.existsSync(uploadDir)) {
 }
 
 // Whitelist MIME type -> ekstensi aman
-const MIME_TO_EXT = {
+const MIME_TO_EXT: Record<string, string> = {
   "image/jpeg": ".jpg",
   "image/jpg": ".jpg",
   "image/png": ".png",
@@ -23,10 +24,10 @@ const MIME_TO_EXT = {
 
 // Storage engine diskStorage untuk simpan file lokal
 const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
+  destination: function (_req: Request, _file: Express.Multer.File, cb: (error: Error | null, destination: string) => void) {
     cb(null, uploadDir);
   },
-  filename: function (req, file, cb) {
+  filename: function (_req: Request, file: Express.Multer.File, cb: (error: Error | null, filename: string) => void) {
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
     // F-05: Tentukan ekstensi berdasarkan MIME type yang teruji/tervalidasi, bukan dari originalname
     const ext = MIME_TO_EXT[file.mimetype] || ".bin";
@@ -35,15 +36,15 @@ const storage = multer.diskStorage({
 });
 
 // Filter jenis file yang diizinkan (Gambar & Dokumen PDF/Zip)
-const fileFilter = (req, file, cb) => {
+const fileFilter = (_req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
   if (MIME_TO_EXT[file.mimetype]) {
     cb(null, true);
   } else {
-    cb(new Error("Format file tidak didukung. Hanya gambar (JPG, PNG, WEBP, GIF) dan dokumen (PDF, ZIP) yang diizinkan."), false);
+    cb(new Error("Format file tidak didukung. Hanya gambar (JPG, PNG, WEBP, GIF) dan dokumen (PDF, ZIP) yang diizinkan."));
   }
 };
 
-const upload = multer({
+export const upload = multer({
   storage: storage,
   fileFilter: fileFilter,
   limits: {
@@ -51,4 +52,8 @@ const upload = multer({
   },
 });
 
+// @ts-ignore - Support legacy require(upload.ts) in CommonJS
+upload.upload = upload;
+export default upload;
 module.exports = upload;
+

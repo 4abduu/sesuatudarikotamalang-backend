@@ -1,12 +1,12 @@
-const cron = require("node-cron");
-const prisma = require("../lib/prisma");
+import cron from "node-cron";
+import prisma from "../lib/prisma";
 
 /**
  * Scheduled job untuk memperbarui status order terkomputasi secara berkala:
  * 1. Menunggu bayar (cod) yang melewati holdExpiresAt -> kedaluwarsa
  * 2. Lunas (midtrans) yang melewati pickupDeadline -> lewat_batas_pengambilan
  */
-function startOrderStatusJob() {
+export function startOrderStatusJob(): void {
   // Berjalan setiap 5 menit
   cron.schedule("*/5 * * * *", async () => {
     try {
@@ -65,4 +65,4 @@ function startOrderStatusJob() {
   console.log("[JOB] Scheduled job status pesanan (orderStatusJob) berhasil diaktifkan");
 }
 
-module.exports = { startOrderStatusJob };
+export default { startOrderStatusJob };

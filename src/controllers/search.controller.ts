@@ -1,9 +1,10 @@
-const prisma = require("../lib/prisma");
+import { Request, Response, NextFunction } from "express";
+import prisma from "../lib/prisma";
 
 // GET /api/search — Search produk dan kreator untuk mobile/customer (query: ?q=)
-const search = async (req, res, next) => {
+export const search = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const q = (req.query.q || "").trim().toLowerCase();
+    const q = typeof req.query.q === "string" ? req.query.q.trim().toLowerCase() : "";
 
     if (!q) {
       return res.json({ products: [], creators: [] });
@@ -51,6 +52,4 @@ const search = async (req, res, next) => {
   }
 };
 
-module.exports = {
-  search,
-};
+export default { search };

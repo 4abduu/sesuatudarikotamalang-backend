@@ -1,12 +1,13 @@
-const prisma = require("../lib/prisma");
+import { Request, Response, NextFunction } from "express";
+import prisma from "../lib/prisma";
 
 // GET /api/reviews — List ulasan publik (dukung filter productId)
-const listReviews = async (req, res, next) => {
+export const listReviews = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { productId } = req.query;
-    const where = { status: "tampil" };
+    const where: any = { status: "tampil" };
 
-    if (productId) {
+    if (typeof productId === "string") {
       where.productId = productId;
     }
 
@@ -33,19 +34,24 @@ const listReviews = async (req, res, next) => {
 };
 
 // POST /api/reviews — Tambah ulasan baru (butuh login, wajib terikat pesanan yang sudah selesai)
-const createReview = async (req, res, next) => {
+export const createReview = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({ error: "Belum login" });
+    }
+
     const { orderItemId, rating, comment } = req.body;
 
-    if (!rating || rating < 1 || rating > 5) {
+    const numericRating = parseInt(rating, 10);
+    if (!rating || isNaN(numericRating) || numericRating < 1 || numericRating > 5) {
       return res.status(400).json({ error: "rating wajib diisi (angka 1-5)" });
     }
 
-    if (!comment || !comment.trim()) {
+    if (!comment || typeof comment !== "string" || !comment.trim()) {
       return res.status(400).json({ error: "comment ulasan wajib diisi" });
     }
 
-    let productId = null;
+    let productId: string | null = null;
 
     if (orderItemId) {
       // Ulasan produk spesifik dari pesanan
@@ -101,7 +107,7 @@ const createReview = async (req, res, next) => {
         userId: req.user.id,
         productId,
         orderItemId: orderItemId || null,
-        rating: parseInt(rating),
+        rating: numericRating,
         comment: comment.trim(),
         status: "tampil",
       },
@@ -120,7 +126,7 @@ const createReview = async (req, res, next) => {
             userId: creatorUserId,
             type: "ulasan_baru",
             title: "Ulasan Baru Produk",
-            body: `${req.user.name} memberikan ulasan bintang ${rating} untuk produk "${review.product.name}": "${comment.trim()}"`,
+            body: `${req.user.name} memberikan ulasan bintang ${numericRating} untuk produk "${review.product.name}": "${comment.trim()}"`,
           },
         }).catch(() => {});
       }
@@ -132,7 +138,7 @@ const createReview = async (req, res, next) => {
   }
 };
 
-module.exports = {
+export default {
   listReviews,
   createReview,
 };

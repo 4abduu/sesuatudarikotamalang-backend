@@ -1,8 +1,13 @@
-const prisma = require("../lib/prisma");
+import { Request, Response, NextFunction } from "express";
+import prisma from "../lib/prisma";
 
 // GET /api/notifications — List notifikasi in-app milik user yang sedang login
-const getNotifications = async (req, res, next) => {
+export const getNotifications = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({ error: "Belum login" });
+    }
+
     const notifications = await prisma.notification.findMany({
       where: { userId: req.user.id },
       orderBy: { createdAt: "desc" },
@@ -17,8 +22,12 @@ const getNotifications = async (req, res, next) => {
 };
 
 // PATCH /api/notifications/:id/read — Tandai 1 notifikasi sebagai sudah dibaca
-const markAsRead = async (req, res, next) => {
+export const markAsRead = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({ error: "Belum login" });
+    }
+
     const { id } = req.params;
 
     const notification = await prisma.notification.findUnique({ where: { id } });
@@ -42,8 +51,12 @@ const markAsRead = async (req, res, next) => {
 };
 
 // PATCH /api/notifications/read-all — Tandai seluruh notifikasi user sebagai sudah dibaca
-const markAllAsRead = async (req, res, next) => {
+export const markAllAsRead = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({ error: "Belum login" });
+    }
+
     await prisma.notification.updateMany({
       where: { userId: req.user.id, isRead: false },
       data: { isRead: true },
@@ -55,7 +68,7 @@ const markAllAsRead = async (req, res, next) => {
   }
 };
 
-module.exports = {
+export default {
   getNotifications,
   markAsRead,
   markAllAsRead,

@@ -1,5 +1,7 @@
+import { Request, Response, NextFunction } from "express";
+
 // Controller untuk menangani upload file tunggal atau jamak
-const uploadSingle = async (req, res, next) => {
+export const uploadSingle = async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: "Tidak ada file yang diunggah" });
@@ -23,9 +25,10 @@ const uploadSingle = async (req, res, next) => {
   }
 };
 
-const uploadMultiple = async (req, res, next) => {
+export const uploadMultiple = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    if (!req.files || req.files.length === 0) {
+    const files = req.files as Express.Multer.File[] | undefined;
+    if (!files || files.length === 0) {
       return res.status(400).json({ error: "Tidak ada file yang diunggah" });
     }
 
@@ -33,7 +36,7 @@ const uploadMultiple = async (req, res, next) => {
       ? process.env.PUBLIC_BASE_URL.replace(/\/$/, "")
       : `${req.protocol}://${req.get("host")}`;
 
-    const uploadedFiles = req.files.map((file) => ({
+    const uploadedFiles = files.map((file) => ({
       url: `${baseUrl}/uploads/${file.filename}`,
       filename: file.filename,
       size: file.size,
@@ -50,7 +53,7 @@ const uploadMultiple = async (req, res, next) => {
   }
 };
 
-module.exports = {
+export default {
   uploadSingle,
   uploadMultiple,
 };

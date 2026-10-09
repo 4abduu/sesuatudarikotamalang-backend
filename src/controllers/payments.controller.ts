@@ -1,8 +1,10 @@
-const crypto = require("crypto");
-const prisma = require("../lib/prisma");
+import { Request, Response, NextFunction } from "express";
+import crypto from "crypto";
+import prisma from "../lib/prisma";
+import { effectiveStock } from "../lib/stock";
 
 // POST /api/payments/webhook — Terima Notifikasi Webhook dari Server Midtrans (TANPA requireAuth)
-const handleWebhook = async (req, res, next) => {
+export const handleWebhook = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { order_id, status_code, gross_amount, signature_key, transaction_status, fraud_status, transaction_id } = req.body;
 
@@ -65,8 +67,6 @@ const handleWebhook = async (req, res, next) => {
     }
 
     let resultStatus = order.status;
-
-    const { effectiveStock } = require("../lib/stock");
 
     // Update status order dalam database transaction
     await prisma.$transaction(async (tx) => {
@@ -301,6 +301,6 @@ const handleWebhook = async (req, res, next) => {
   }
 };
 
-module.exports = {
+export default {
   handleWebhook,
 };

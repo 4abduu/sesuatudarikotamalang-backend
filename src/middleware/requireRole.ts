@@ -1,9 +1,11 @@
+import { Request, Response, NextFunction } from "express";
+
 /**
  * Middleware cek role user. Pasang SETELAH requireAuth.
  * Contoh: router.get('/admin-only', requireAuth, requireRole('admin'), handler)
  */
-function requireRole(...allowedRoles) {
-  return (req, res, next) => {
+export function requireRole(...allowedRoles: string[]) {
+  return (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) {
       return res.status(401).json({ error: "Belum login" });
     }
@@ -14,4 +16,4 @@ function requireRole(...allowedRoles) {
   };
 }
 
-module.exports = { requireRole };
+export default requireRole;

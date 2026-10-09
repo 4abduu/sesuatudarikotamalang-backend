@@ -1,22 +1,15 @@
+export interface VariantOptionInput {
+  name: string;
+  values: string[];
+}
+
 /**
  * Helper Cartesian Product untuk membuat kombinasi varian otomatis
- * Contoh input:
- * [
- *   { name: "Motif", values: ["Ubin", "Sulur"] },
- *   { name: "Ukuran", values: ["S", "M"] }
- * ]
- * Output:
- * [
- *   ["Ubin", "S"],
- *   ["Ubin", "M"],
- *   ["Sulur", "S"],
- *   ["Sulur", "M"]
- * ]
  */
-function cartesianProduct(variantOptions) {
+export function cartesianProduct(variantOptions: VariantOptionInput[]): string[][] {
   if (!variantOptions || variantOptions.length === 0) return [[]];
 
-  return variantOptions.reduce(
+  return variantOptions.reduce<string[][]>(
     (acc, option) => {
       const values = Array.isArray(option.values) ? option.values : [];
       if (values.length === 0) return acc;
@@ -27,5 +20,3 @@ function cartesianProduct(variantOptions) {
     [[]]
   );
 }
-
-module.exports = { cartesianProduct };
