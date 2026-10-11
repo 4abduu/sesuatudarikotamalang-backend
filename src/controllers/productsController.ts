@@ -16,14 +16,22 @@ function createSlug(name: string): string {
 // GET /api/products — list semua produk aktif (dukung filter categoryId, search, sort)
 export const listProducts = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { categoryId, search, sort } = req.query;
+    const { categoryId, category, search, sort } = req.query;
 
     const where: any = {
       isActive: true,
       artisan: { status: "aktif" },
     };
 
-    if (typeof categoryId === "string") {
+    if (typeof category === "string" && category.trim()) {
+      const foundCategory = await prisma.category.findUnique({
+        where: { slug: category.trim() },
+      });
+      if (!foundCategory) {
+        return res.json({ products: [] });
+      }
+      where.categoryId = foundCategory.id;
+    } else if (typeof categoryId === "string") {
       where.categoryId = categoryId;
     }
 
@@ -56,12 +64,37 @@ export const listProducts = async (req: Request, res: Response, next: NextFuncti
       },
     });
 
-    // Lampirkan effectiveStock ke tiap varian
+    // A3: Agregasi rating dan jumlah ulasan (hanya review tampil) dengan satu groupBy
+    const productIds = products.map((p) => p.id);
+    const reviewAggregates = await prisma.review.groupBy({
+      by: ["productId"],
+      where: {
+        productId: { in: productIds },
+        status: "tampil",
+      },
+      _avg: { rating: true },
+      _count: { rating: true },
+    });
+
+    const ratingMap: Record<string, { avgRating: number; reviewCount: number }> = {};
+    for (const agg of reviewAggregates) {
+      if (agg.productId) {
+        ratingMap[agg.productId] = {
+          avgRating: agg._avg.rating ? Number(agg._avg.rating.toFixed(1)) : 0,
+          reviewCount: agg._count.rating || 0,
+        };
+      }
+    }
+
+    // Lampirkan effectiveStock ke tiap varian + rating info
     const productsWithStock = await Promise.all(
       products.map(async (p) => {
         const variantsWithStock = await attachEffectiveStockToVariants(p.variants);
+        const stats = ratingMap[p.id] || { avgRating: 0, reviewCount: 0 };
         return {
           ...p,
+          avgRating: stats.avgRating,
+          reviewCount: stats.reviewCount,
           variants: variantsWithStock,
         };
       })
@@ -112,9 +145,17 @@ export const getProductById = async (req: Request, res: Response, next: NextFunc
 
     const variantsWithStock = await attachEffectiveStockToVariants(product.variants);
 
+    // A3: Hitung avgRating dan reviewCount dari ulasan yang berstatus tampil
+    const totalReviews = product.reviews.length;
+    const avgRating = totalReviews > 0
+      ? Number((product.reviews.reduce((sum, r) => sum + r.rating, 0) / totalReviews).toFixed(1))
+      : 0;
+
     res.json({
       product: {
         ...product,
+        avgRating,
+        reviewCount: totalReviews,
         variants: variantsWithStock,
       },
     });
@@ -191,6 +232,16 @@ export const createProduct = async (req: Request, res: Response, next: NextFunct
       // Simpan variantOptions jika ada
       const savedOptions: any[] = [];
       if (Array.isArray(variantOptions) && variantOptions.length > 0) {
+        // A9: Validasi batas varian — maks 3 opsi, 10 nilai per opsi
+        if (variantOptions.length > 3) {
+          throw { status: 400, message: "Maksimal 3 opsi varian per produk" };
+        }
+        for (const opt of variantOptions) {
+          if (Array.isArray(opt.values) && opt.values.length > 10) {
+            throw { status: 400, message: `Opsi varian "${opt.name}" memiliki lebih dari 10 nilai. Maksimal 10 nilai per opsi.` };
+          }
+        }
+
         for (let i = 0; i < variantOptions.length; i++) {
           const opt = variantOptions[i];
           const createdOpt = await tx.productVariantOption.create({
@@ -412,9 +463,73 @@ export const upsertStory = async (req: Request, res: Response, next: NextFunctio
   }
 };
 
+// GET /api/products/mine — A4: Produk milik kreator yang sedang login (termasuk nonaktif)
+export const listMyProducts = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: "Belum login" });
+    }
+
+    const artisan = await prisma.artisan.findUnique({ where: { userId: req.user.id } });
+    if (!artisan) {
+      return res.status(404).json({ error: "Profil kreator tidak ditemukan" });
+    }
+
+    const products = await prisma.product.findMany({
+      where: { artisanId: artisan.id },
+      orderBy: { createdAt: "desc" },
+      include: {
+        category: true,
+        variantOptions: true,
+        variants: true,
+        story: true,
+      },
+    });
+
+    const productIds = products.map((p) => p.id);
+    const reviewAggregates = await prisma.review.groupBy({
+      by: ["productId"],
+      where: {
+        productId: { in: productIds },
+        status: "tampil",
+      },
+      _avg: { rating: true },
+      _count: { rating: true },
+    });
+
+    const ratingMap: Record<string, { avgRating: number; reviewCount: number }> = {};
+    for (const agg of reviewAggregates) {
+      if (agg.productId) {
+        ratingMap[agg.productId] = {
+          avgRating: agg._avg.rating ? Number(agg._avg.rating.toFixed(1)) : 0,
+          reviewCount: agg._count.rating || 0,
+        };
+      }
+    }
+
+    const productsWithStock = await Promise.all(
+      products.map(async (p) => {
+        const variantsWithStock = await attachEffectiveStockToVariants(p.variants);
+        const stats = ratingMap[p.id] || { avgRating: 0, reviewCount: 0 };
+        return {
+          ...p,
+          avgRating: stats.avgRating,
+          reviewCount: stats.reviewCount,
+          variants: variantsWithStock,
+        };
+      })
+    );
+
+    res.json({ products: productsWithStock });
+  } catch (err) {
+    next(err);
+  }
+};
+
 export default {
   listProducts,
   getProductById,
+  listMyProducts,
   createProduct,
   updateProduct,
   deleteProduct,

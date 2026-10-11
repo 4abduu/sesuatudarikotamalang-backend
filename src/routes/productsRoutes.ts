@@ -8,6 +8,9 @@ const router = express.Router();
 // GET /api/products — list semua produk aktif (dukung filter categoryId, search, sort)
 router.get("/", productsController.listProducts);
 
+// GET /api/products/mine — A4: list produk milik kreator yang sedang login (sebelum /:id)
+router.get("/mine", requireAuth, requireRole("creator"), productsController.listMyProducts);
+
 // GET /api/products/:id — detail satu produk (increment viewCount)
 router.get("/:id", productsController.getProductById);
 

@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import prisma from "../lib/prisma";
+import { getPickupSlots, getSlotCapacity } from "../lib/slots";
 
 // GET /api/admin/dashboard — ringkasan statcard + data grafik dashboard admin
 export const getDashboard = async (req: Request, res: Response, next: NextFunction) => {
@@ -11,8 +12,11 @@ export const getDashboard = async (req: Request, res: Response, next: NextFuncti
     const startOfDay = new Date(startOfDayWIB.getTime() - WIB_OFFSET_MS);
     const endOfDay = new Date(startOfDay.getTime() + 86400000 - 1);
 
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    // A7: 7 hari ke belakang dalam zona WIB
+    const sevenDaysAgoWIB = new Date(Date.UTC(
+      nowWIB.getUTCFullYear(), nowWIB.getUTCMonth(), nowWIB.getUTCDate() - 6
+    ));
+    const sevenDaysAgoUTC = new Date(sevenDaysAgoWIB.getTime() - WIB_OFFSET_MS);
 
     const [
       ordersToday,
@@ -20,8 +24,10 @@ export const getDashboard = async (req: Request, res: Response, next: NextFuncti
       pendingApplications,
       lowStockCount,
       statusDistribution,
-      topSellingProducts,
+      topSellingRaw,
       recentPaidOrders,
+      upcomingPickups,
+      todaySlotOrders,
     ] = await Promise.all([
       // 1. Pesanan dengan jadwal pickup HARI INI saja
       prisma.order.count({
@@ -45,24 +51,92 @@ export const getDashboard = async (req: Request, res: Response, next: NextFuncti
         by: ["status"],
         _count: { _all: true },
       }),
-      // 6. Produk terlaris (soldCount tertinggi)
+      // 6. A7: Produk terlaris dengan totalRevenue (via OrderItem)
       prisma.product.findMany({
-        where: { isActive: true },
+        where: { isActive: true, soldCount: { gt: 0 } },
         orderBy: { soldCount: "desc" },
         take: 5,
-        include: { artisan: { select: { brandName: true } }, category: true },
+        select: {
+          id: true,
+          name: true,
+          soldCount: true,
+          orderItems: {
+            where: {
+              order: { OR: [{ status: "lunas" }, { status: "selesai" }] },
+            },
+            select: { quantity: true, priceSnapshot: true },
+          },
+        },
       }),
-      // 7. Pesanan 7 hari terakhir (untuk hitung pendapatan 7 hari terakhir)
+      // 7. Pesanan 7 hari terakhir (untuk hitung pendapatan 7 hari dan revenueByDay)
       prisma.order.findMany({
         where: {
-          createdAt: { gte: sevenDaysAgo },
+          createdAt: { gte: sevenDaysAgoUTC },
           OR: [{ status: "lunas" }, { status: "selesai" }],
         },
         select: { totalAmount: true, createdAt: true },
       }),
+      // 8. A7: upcomingPickups — maks 5 order lunas terdekat (pickupDate >= hari ini)
+      prisma.order.findMany({
+        where: {
+          status: "lunas",
+          pickupDate: { gte: startOfDay },
+        },
+        orderBy: [{ pickupDate: "asc" }, { pickupSlot: "asc" }],
+        take: 5,
+        include: {
+          user: { select: { id: true, name: true } },
+          items: { include: { product: { select: { id: true, name: true } } } },
+        },
+      }),
+      // 9. A7: slotDistribution — order hari ini per slot (status relevan)
+      prisma.order.groupBy({
+        by: ["pickupSlot"],
+        where: {
+          pickupDate: { gte: startOfDay, lte: endOfDay },
+          status: { in: ["menunggu_bayar", "lunas", "selesai"] },
+        },
+        _count: { _all: true },
+      }),
     ]);
 
     const revenue7Days = recentPaidOrders.reduce((sum, o) => sum + o.totalAmount, 0);
+
+    // A7: revenueByDay — 7 hari terakhir dikelompokkan per hari WIB, hari kosong = 0
+    const revenueByDay: { date: string; revenue: number }[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const dayWIB = new Date(Date.UTC(
+        nowWIB.getUTCFullYear(), nowWIB.getUTCMonth(), nowWIB.getUTCDate() - i
+      ));
+      const dayStr = `${dayWIB.getUTCFullYear()}-${String(dayWIB.getUTCMonth() + 1).padStart(2, "0")}-${String(dayWIB.getUTCDate()).padStart(2, "0")}`;
+      const dayStartUTC = new Date(dayWIB.getTime() - WIB_OFFSET_MS);
+      const dayEndUTC = new Date(dayStartUTC.getTime() + 86400000);
+      const dayRevenue = recentPaidOrders
+        .filter((o) => o.createdAt >= dayStartUTC && o.createdAt < dayEndUTC)
+        .reduce((sum, o) => sum + o.totalAmount, 0);
+      revenueByDay.push({ date: dayStr, revenue: dayRevenue });
+    }
+
+    // A7: topSellingProducts — reshape ke { id, name, soldCount, totalRevenue }
+    const topSellingProducts = topSellingRaw.map((p) => ({
+      id: p.id,
+      name: p.name,
+      soldCount: p.soldCount,
+      totalRevenue: p.orderItems.reduce((sum, item) => sum + item.quantity * item.priceSnapshot, 0),
+    }));
+
+    // A7: slotDistribution — semua slot dengan capacity, termasuk slot tanpa booking
+    const slots = getPickupSlots();
+    const capacity = getSlotCapacity();
+    const slotCountMap: Record<string, number> = {};
+    for (const row of todaySlotOrders) {
+      slotCountMap[row.pickupSlot] = row._count._all;
+    }
+    const slotDistribution = slots.map((time) => ({
+      time,
+      capacity,
+      booked: slotCountMap[time] || 0,
+    }));
 
     res.json({
       ordersToday,
@@ -70,8 +144,11 @@ export const getDashboard = async (req: Request, res: Response, next: NextFuncti
       pendingApplications,
       lowStockCount,
       revenue7Days,
+      revenueByDay,
       statusDistribution: statusDistribution.map((s) => ({ status: s.status, count: s._count._all })),
       topSellingProducts,
+      slotDistribution,
+      upcomingPickups,
     });
   } catch (err) {
     next(err);
@@ -222,13 +299,14 @@ export const rejectApplication = async (req: Request, res: Response, next: NextF
 };
 
 // GET /api/admin/orders — Daftar seluruh pesanan untuk admin
+// A7: tambah filter pickupDate=YYYY-MM-DD dan paymentMethod
 export const listOrders = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { status, search } = req.query;
+    const { status, search, pickupDate, paymentMethod } = req.query;
     const where: any = {};
 
-    if (typeof status === "string") {
-      where.status = status;
+    if (typeof status === "string" && status.trim()) {
+      where.status = status.trim();
     }
 
     if (typeof search === "string" && search.trim()) {
@@ -237,6 +315,18 @@ export const listOrders = async (req: Request, res: Response, next: NextFunction
         { user: { name: { contains: search } } },
         { user: { email: { contains: search } } },
       ];
+    }
+
+    // A7: filter pickupDate (YYYY-MM-DD)
+    if (typeof pickupDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(pickupDate)) {
+      const dayStart = new Date(pickupDate + "T00:00:00+07:00"); // WIB
+      const dayEnd = new Date(dayStart.getTime() + 86400000 - 1);
+      where.pickupDate = { gte: dayStart, lte: dayEnd };
+    }
+
+    // A7: filter paymentMethod
+    if (typeof paymentMethod === "string" && ["midtrans", "cod"].includes(paymentMethod)) {
+      where.paymentMethod = paymentMethod;
     }
 
     const orders = await prisma.order.findMany({
@@ -511,19 +601,31 @@ export const updateSettings = async (req: Request, res: Response, next: NextFunc
       }
     }
 
+    // A9: autoCancelEnabled harus boolean sungguhan (bukan string "true"/"false")
+    if (autoCancelEnabled !== undefined && typeof autoCancelEnabled !== "boolean") {
+      return res.status(400).json({ error: "autoCancelEnabled harus bertipe boolean (true/false), bukan string" });
+    }
+
+    // A9: whatsappAdminNumber hanya digit (boleh diawali +)
+    if (whatsappAdminNumber !== undefined && whatsappAdminNumber !== null) {
+      if (typeof whatsappAdminNumber !== "string" || !/^\+?\d+$/.test(whatsappAdminNumber)) {
+        return res.status(400).json({ error: "whatsappAdminNumber hanya boleh berisi digit (boleh diawali +)" });
+      }
+    }
+
     const settings = await prisma.appSettings.upsert({
       where: { id: 1 },
       create: {
         id: 1,
         ...(parsedHold !== undefined && { holdDurationMinutes: parsedHold }),
-        ...(autoCancelEnabled !== undefined && { autoCancelEnabled: Boolean(autoCancelEnabled) }),
+        ...(autoCancelEnabled !== undefined && { autoCancelEnabled }),
         ...(parsedDeadline !== undefined && { pickupDeadlineDays: parsedDeadline }),
         ...(whatsappAdminNumber !== undefined && { whatsappAdminNumber }),
         ...(notificationEmail !== undefined && { notificationEmail }),
       },
       update: {
         ...(parsedHold !== undefined && { holdDurationMinutes: parsedHold }),
-        ...(autoCancelEnabled !== undefined && { autoCancelEnabled: Boolean(autoCancelEnabled) }),
+        ...(autoCancelEnabled !== undefined && { autoCancelEnabled }),
         ...(parsedDeadline !== undefined && { pickupDeadlineDays: parsedDeadline }),
         ...(whatsappAdminNumber !== undefined && { whatsappAdminNumber }),
         ...(notificationEmail !== undefined && { notificationEmail }),
@@ -597,6 +699,192 @@ export const toggleArtisanStatus = async (req: Request, res: Response, next: Nex
   }
 };
 
+// GET /api/admin/artisans — A5: Daftar seluruh kreator untuk admin (dengan productCount, avgRating, user.email)
+export const listAdminArtisans = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { status } = req.query;
+    const where: any = {};
+    if (status === "aktif" || status === "nonaktif") {
+      where.status = status;
+    }
+
+    const artisans = await prisma.artisan.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      include: {
+        user: { select: { id: true, name: true, email: true, avatarUrl: true } },
+        products: { select: { id: true, isActive: true } },
+      },
+    });
+
+    const artisanIds = artisans.map((a) => a.id);
+    const reviews = await prisma.review.findMany({
+      where: {
+        status: "tampil",
+        product: { artisanId: { in: artisanIds } },
+      },
+      select: {
+        rating: true,
+        product: { select: { artisanId: true } },
+      },
+    });
+
+    const ratingMap: Record<string, { sum: number; count: number }> = {};
+    for (const r of reviews) {
+      const aId = r.product?.artisanId;
+      if (!aId) continue;
+      if (!ratingMap[aId]) ratingMap[aId] = { sum: 0, count: 0 };
+      ratingMap[aId].sum += r.rating;
+      ratingMap[aId].count += 1;
+    }
+
+    const artisansWithStats = artisans.map((a) => {
+      const stats = ratingMap[a.id];
+      const avgRating = stats && stats.count > 0 ? Number((stats.sum / stats.count).toFixed(1)) : 0;
+      return {
+        id: a.id,
+        userId: a.userId,
+        brandName: a.brandName,
+        bio: a.bio,
+        avatarUrl: a.avatarUrl,
+        status: a.status,
+        createdAt: a.createdAt,
+        updatedAt: a.updatedAt,
+        user: a.user,
+        productCount: a.products.length,
+        avgRating,
+      };
+    });
+
+    res.json({ artisans: artisansWithStats });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// GET /api/admin/products — A5: Daftar seluruh produk untuk admin (termasuk nonaktif)
+export const listAdminProducts = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { q, categoryId } = req.query;
+    const where: any = {};
+
+    if (typeof categoryId === "string" && categoryId.trim()) {
+      where.categoryId = categoryId.trim();
+    }
+
+    if (typeof q === "string" && q.trim()) {
+      const query = q.trim().toLowerCase();
+      where.OR = [
+        { name: { contains: query } },
+        { shortDescription: { contains: query } },
+        { artisan: { brandName: { contains: query } } },
+      ];
+    }
+
+    const products = await prisma.product.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      include: {
+        category: true,
+        artisan: true,
+        variantOptions: true,
+        variants: true,
+        story: true,
+      },
+    });
+
+    res.json({ products });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// PATCH /api/admin/products/:id/active — A5: Ubah status aktif/nonaktif produk
+export const toggleProductActive = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const { isActive } = req.body;
+
+    if (typeof isActive !== "boolean") {
+      return res.status(400).json({ error: "Field isActive wajib berupa boolean (true/false)" });
+    }
+
+    const product = await prisma.product.findUnique({ where: { id } });
+    if (!product) {
+      return res.status(404).json({ error: "Produk tidak ditemukan" });
+    }
+
+    const updated = await prisma.product.update({
+      where: { id },
+      data: { isActive },
+    });
+
+    res.json({
+      message: `Produk berhasil di${isActive ? "aktifkan" : "nonaktifkan"}`,
+      product: updated,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// GET /api/admin/reviews — A5: Daftar ulasan untuk admin (dengan filter rating, status, q, dan summary)
+export const listAdminReviews = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { rating, status, q } = req.query;
+    const where: any = {};
+
+    if (typeof rating === "string" && !isNaN(Number(rating))) {
+      where.rating = Number(rating);
+    }
+
+    if (status === "tampil" || status === "disembunyikan") {
+      where.status = status;
+    }
+
+    if (typeof q === "string" && q.trim()) {
+      const query = q.trim().toLowerCase();
+      where.OR = [
+        { comment: { contains: query } },
+        { user: { name: { contains: query } } },
+        { product: { name: { contains: query } } },
+      ];
+    }
+
+    const [reviews, allReviews] = await Promise.all([
+      prisma.review.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        include: {
+          user: { select: { id: true, name: true, email: true, avatarUrl: true } },
+          product: { select: { id: true, name: true, images: true } },
+        },
+      }),
+      prisma.review.findMany({
+        select: { rating: true, status: true },
+      }),
+    ]);
+
+    const visibleCount = allReviews.filter((r) => r.status === "tampil").length;
+    const hiddenCount = allReviews.filter((r) => r.status === "disembunyikan").length;
+    const avgRating = allReviews.length > 0
+      ? Number((allReviews.reduce((sum, r) => sum + r.rating, 0) / allReviews.length).toFixed(1))
+      : 0;
+
+    res.json({
+      reviews,
+      summary: {
+        avgRating,
+        visibleCount,
+        hiddenCount,
+        totalReviews: allReviews.length,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 export default {
   getDashboard,
   listApplications,
@@ -611,4 +899,8 @@ export default {
   toggleReviewHide,
   deleteReview,
   toggleArtisanStatus,
+  listAdminArtisans,
+  listAdminProducts,
+  toggleProductActive,
+  listAdminReviews,
 };

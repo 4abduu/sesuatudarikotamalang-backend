@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import prisma from "../lib/prisma";
 import { effectiveStock } from "../lib/stock";
 import { snap } from "../lib/midtrans";
+import { getPickupSlots, getSlotCapacity } from "../lib/slots";
 
 // GET /api/orders — Riwayat pesanan milik user yang sedang login
 export const listOrders = async (req: Request, res: Response, next: NextFunction) => {
@@ -90,11 +91,46 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
       return res.status(400).json({ error: "paymentMethod harus 'midtrans' atau 'cod'" });
     }
 
+    // A8: Validasi pickupSlot terhadap daftar slot yang dikonfigurasi
+    const configuredSlots = getPickupSlots();
+    if (!configuredSlots.includes(pickupSlot)) {
+      return res.status(400).json({ error: `pickupSlot tidak valid. Slot tersedia: ${configuredSlots.join(", ")}` });
+    }
+
+    // A8: Validasi pickupDate — tidak di masa lalu dan dalam jendela 14 hari
+    // Mendukung format YYYY-MM-DD maupun ISO string ("2026-10-11T...")
+    const pickupDateStr = typeof pickupDate === "string" && pickupDate.includes("T")
+      ? pickupDate.split("T")[0]
+      : String(pickupDate).slice(0, 10);
+
+    const WIB_OFFSET_MS = 7 * 60 * 60 * 1000;
+    const nowWIB = new Date(Date.now() + WIB_OFFSET_MS);
+    const todayWIBStr = `${nowWIB.getUTCFullYear()}-${String(nowWIB.getUTCMonth() + 1).padStart(2, "0")}-${String(nowWIB.getUTCDate()).padStart(2, "0")}`;
+    if (pickupDateStr < todayWIBStr) {
+      return res.status(400).json({ error: "pickupDate tidak boleh di masa lalu" });
+    }
+    const maxDate = new Date(Date.UTC(nowWIB.getUTCFullYear(), nowWIB.getUTCMonth(), nowWIB.getUTCDate() + 14));
+    const maxDateStr = `${maxDate.getUTCFullYear()}-${String(maxDate.getUTCMonth() + 1).padStart(2, "0")}-${String(maxDate.getUTCDate()).padStart(2, "0")}`;
+    if (pickupDateStr > maxDateStr) {
+      return res.status(400).json({ error: "pickupDate maksimal 14 hari dari hari ini" });
+    }
+
     const userId = req.user.id;
 
     // F-07: Batasi jumlah order menunggu_bayar aktif per user (max 3)
+    const settings = await prisma.appSettings.findUnique({ where: { id: 1 } });
+    const autoCancel = settings?.autoCancelEnabled ?? true;
+    const nowCheck = new Date();
+
     const activeOrderCount = await prisma.order.count({
-      where: { userId, status: "menunggu_bayar" },
+      where: {
+        userId,
+        status: "menunggu_bayar",
+        OR: [
+          { holdExpiresAt: { gt: nowCheck } },
+          ...(autoCancel ? [] : [{ paymentMethod: "cod" as any }]),
+        ],
+      },
     });
     if (activeOrderCount >= 3) {
       return res.status(429).json({
@@ -105,6 +141,31 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
     // Pengecekan dan pembuatan order dilakukan dalam SATU transaksi database (Atomic)
     const newOrder = await prisma.$transaction(
       async (tx) => {
+      // A8: Validasi kapasitas slot DI DALAM transaksi (mencegah race condition)
+      const slotCapacity = getSlotCapacity();
+      const pickupDayStart = new Date(pickupDateStr + "T00:00:00+07:00");
+      const pickupDayEnd = new Date(pickupDayStart.getTime() + 86400000 - 1);
+      const txNow = new Date();
+
+      const bookedCount = await tx.order.count({
+        where: {
+          pickupDate: { gte: pickupDayStart, lte: pickupDayEnd },
+          pickupSlot: pickupSlot,
+          OR: [
+            { status: "lunas" },
+            { status: "selesai" },
+            {
+              status: "menunggu_bayar",
+              holdExpiresAt: { gt: txNow },
+            },
+          ],
+        },
+      });
+
+      if (bookedCount >= slotCapacity) {
+        throw { status: 409, message: "Slot pickup ini sudah penuh. Silakan pilih slot atau tanggal lain.", code: "SLOT_FULL" };
+      }
+
       // 1. Ambil data produk
       const product = await tx.product.findUnique({
         where: { id: productId },
@@ -268,7 +329,9 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
     res.status(201).json({ order: newOrder, snap: snapResponse });
   } catch (err: any) {
     if (err.status) {
-      return res.status(err.status).json({ error: err.message });
+      const errorResp: any = { error: err.message };
+      if (err.code) errorResp.code = err.code;
+      return res.status(err.status).json(errorResp);
     }
     next(err);
   }

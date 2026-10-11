@@ -10,6 +10,9 @@ router.get("/applications/mine", requireAuth, artisansController.getMyApplicatio
 // PUT /api/artisans/mine — Update profil kreator (bio, avatarUrl, brandName) oleh kreator sendiri (Daftarkan sebelum /:id)
 router.put("/mine", requireAuth, artisansController.updateMyProfile);
 
+// GET /api/artisans/mine — A4: Profil kreator milik user yang sedang login (sebelum /:id)
+router.get("/mine", requireAuth, artisansController.getMyArtisanProfile);
+
 // GET /api/artisans — daftar kreator aktif
 router.get("/", artisansController.listArtisans);
 

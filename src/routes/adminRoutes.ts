@@ -47,4 +47,16 @@ router.delete("/reviews/:id", adminController.deleteReview);
 // PATCH /api/admin/artisans/:id/toggle-status — Ubah status aktif/nonaktif kreator
 router.patch("/artisans/:id/toggle-status", adminController.toggleArtisanStatus);
 
+// GET /api/admin/artisans — A5: Daftar seluruh kreator (status, productCount, avgRating)
+router.get("/artisans", adminController.listAdminArtisans);
+
+// GET /api/admin/products — A5: Daftar seluruh produk (termasuk nonaktif)
+router.get("/products", adminController.listAdminProducts);
+
+// PATCH /api/admin/products/:id/active — A5: Toggle status aktif/nonaktif produk
+router.patch("/products/:id/active", adminController.toggleProductActive);
+
+// GET /api/admin/reviews — A5: Daftar seluruh ulasan untuk admin
+router.get("/reviews", adminController.listAdminReviews);
+
 export default router;

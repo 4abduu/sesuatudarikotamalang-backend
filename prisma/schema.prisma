@@ -149,6 +149,7 @@ model ArtisanApplication {
   category       Category?         @relation(fields: [categoryId], references: [id])
   description    String            @db.Text
   sampleFileUrl  String?
+  samplePhotos   Json?             // array of string URL (foto sampel produk)
   status         ApplicationStatus @default(pending)
   rejectReason   String?           @db.Text
   submittedAt    DateTime          @default(now())
@@ -163,9 +164,12 @@ model ArtisanApplication {
 // ----------------------------------------------------------------------------
 
 model Category {
-  id   String @id @default(cuid())
-  name String @unique
-  slug String @unique
+  id        String @id @default(cuid())
+  name      String @unique
+  slug      String @unique
+  sortOrder Int    @default(0)
+  iconName  String?
+  blurb     String?
 
   products     Product[]
   applications ArtisanApplication[]
@@ -248,6 +252,7 @@ model ProductStory {
   product       Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
   title         String
   content       String   @db.Text
+  process       String?  @db.Text
   coverImageUrl String?
   processImages Json // array of string URL
   createdAt     DateTime @default(now())

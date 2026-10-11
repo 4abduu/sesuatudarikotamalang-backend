@@ -138,7 +138,30 @@ export const createReview = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
+// GET /api/reviews/mine — A4: Ulasan milik pengguna yang sedang login (semua status)
+export const listMyReviews = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: "Belum login" });
+    }
+
+    const reviews = await prisma.review.findMany({
+      where: { userId: req.user.id },
+      include: {
+        product: { select: { id: true, name: true, images: true, slug: true } },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    res.json({ reviews });
+  } catch (err) {
+    next(err);
+  }
+};
+
 export default {
   listReviews,
   createReview,
+  listMyReviews,
 };
+

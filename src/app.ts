@@ -34,6 +34,8 @@ import paymentsRoutes from "./routes/paymentsRoutes";
 import notificationsRoutes from "./routes/notificationsRoutes";
 import searchRoutes from "./routes/searchRoutes";
 import uploadRoutes from "./routes/uploadRoutes";
+import categoriesRoutes from "./routes/categoriesRoutes";
+import slotsRoutes from "./routes/slotsRoutes";
 
 const app = express();
 
@@ -81,6 +83,7 @@ app.get("/", (_req: Request, res: Response) => {
 });
 
 app.use("/api/auth", authRoutes);
+app.use("/api/categories", categoriesRoutes);
 app.use("/api/products", productsRoutes);
 app.use("/api/orders", ordersRoutes);
 app.use("/api/artisans", artisansRoutes);
@@ -90,6 +93,7 @@ app.use("/api/payments", paymentsRoutes);
 app.use("/api/notifications", notificationsRoutes);
 app.use("/api/search", searchRoutes);
 app.use("/api/upload", uploadRoutes);
+app.use("/api/slots", slotsRoutes);
 
 // 404 handler
 app.use((_req: Request, res: Response) => {
