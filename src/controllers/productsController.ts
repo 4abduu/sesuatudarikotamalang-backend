@@ -16,7 +16,10 @@ function createSlug(name: string): string {
 // GET /api/products — list semua produk aktif (dukung filter categoryId, search, sort)
 export const listProducts = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { categoryId, category, search, sort } = req.query;
+    const { categoryId, category, search, sort, page, limit } = req.query;
+
+    const parsedPage = typeof page === "string" && !isNaN(parseInt(page)) && parseInt(page) > 0 ? parseInt(page) : undefined;
+    const parsedLimit = typeof limit === "string" && !isNaN(parseInt(limit)) && parseInt(limit) > 0 ? parseInt(limit) : undefined;
 
     const where: any = {
       isActive: true,
@@ -52,9 +55,17 @@ export const listProducts = async (req: Request, res: Response, next: NextFuncti
     if (sort === "terlaris") orderBy = { soldCount: "desc" };
     if (sort === "terpopuler") orderBy = { viewCount: "desc" };
 
+    let total: number | undefined = undefined;
+    if (parsedPage !== undefined && parsedLimit !== undefined) {
+      total = await prisma.product.count({ where });
+    }
+
     const products = await prisma.product.findMany({
       where,
       orderBy,
+      ...(parsedPage !== undefined && parsedLimit !== undefined
+        ? { skip: (parsedPage - 1) * parsedLimit, take: parsedLimit }
+        : {}),
       include: {
         category: true,
         artisan: true,
@@ -100,7 +111,17 @@ export const listProducts = async (req: Request, res: Response, next: NextFuncti
       })
     );
 
-    res.json({ products: productsWithStock });
+    const responseData: any = { products: productsWithStock };
+    if (parsedPage !== undefined && parsedLimit !== undefined && total !== undefined) {
+      responseData.pagination = {
+        page: parsedPage,
+        limit: parsedLimit,
+        total,
+        totalPages: Math.ceil(total / parsedLimit),
+      };
+    }
+
+    res.json(responseData);
   } catch (err) {
     next(err);
   }

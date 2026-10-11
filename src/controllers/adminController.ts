@@ -302,7 +302,11 @@ export const rejectApplication = async (req: Request, res: Response, next: NextF
 // A7: tambah filter pickupDate=YYYY-MM-DD dan paymentMethod
 export const listOrders = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { status, search, pickupDate, paymentMethod } = req.query;
+    const { status, search, pickupDate, paymentMethod, page, limit } = req.query;
+
+    const parsedPage = typeof page === "string" && !isNaN(parseInt(page)) && parseInt(page) > 0 ? parseInt(page) : undefined;
+    const parsedLimit = typeof limit === "string" && !isNaN(parseInt(limit)) && parseInt(limit) > 0 ? parseInt(limit) : undefined;
+
     const where: any = {};
 
     if (typeof status === "string" && status.trim()) {
@@ -329,9 +333,17 @@ export const listOrders = async (req: Request, res: Response, next: NextFunction
       where.paymentMethod = paymentMethod;
     }
 
+    let total: number | undefined = undefined;
+    if (parsedPage !== undefined && parsedLimit !== undefined) {
+      total = await prisma.order.count({ where });
+    }
+
     const orders = await prisma.order.findMany({
       where,
       orderBy: { createdAt: "desc" },
+      ...(parsedPage !== undefined && parsedLimit !== undefined
+        ? { skip: (parsedPage - 1) * parsedLimit, take: parsedLimit }
+        : {}),
       include: {
         user: { select: { id: true, name: true, email: true } },
         items: { include: { product: true, variant: true } },
@@ -339,7 +351,17 @@ export const listOrders = async (req: Request, res: Response, next: NextFunction
       },
     });
 
-    res.json({ orders });
+    const responseData: any = { orders };
+    if (parsedPage !== undefined && parsedLimit !== undefined && total !== undefined) {
+      responseData.pagination = {
+        page: parsedPage,
+        limit: parsedLimit,
+        total,
+        totalPages: Math.ceil(total / parsedLimit),
+      };
+    }
+
+    res.json(responseData);
   } catch (err) {
     next(err);
   }
