@@ -18,7 +18,10 @@ export const listProducts = async (req: Request, res: Response, next: NextFuncti
   try {
     const { categoryId, search, sort } = req.query;
 
-    const where: any = { isActive: true };
+    const where: any = {
+      isActive: true,
+      artisan: { status: "aktif" },
+    };
 
     if (typeof categoryId === "string") {
       where.categoryId = categoryId;
@@ -103,7 +106,7 @@ export const getProductById = async (req: Request, res: Response, next: NextFunc
       },
     });
 
-    if (!product || !product.isActive) {
+    if (!product || !product.isActive || product.artisan.status !== "aktif") {
       return res.status(404).json({ error: "Produk tidak ditemukan atau tidak aktif" });
     }
 
@@ -140,8 +143,9 @@ export const createProduct = async (req: Request, res: Response, next: NextFunct
       variantStocks,  // opsional: array of { combination: ["Ubin"], stock: 10 }
     } = req.body;
 
-    if (!name || !categoryId || !price || !description) {
-      return res.status(400).json({ error: "name, categoryId, price, dan description wajib diisi" });
+    const parsedPrice = parseInt(price);
+    if (isNaN(parsedPrice) || parsedPrice <= 0) {
+      return res.status(400).json({ error: "price harus berupa angka bulat positif" });
     }
 
     // Cari artisanId pengunggah
@@ -177,7 +181,7 @@ export const createProduct = async (req: Request, res: Response, next: NextFunct
           slug,
           shortDescription,
           description,
-          price: parseInt(price),
+          price: parsedPrice,
           images: parsedImages,
           isLimited: Boolean(isLimited),
           shopeeUrl,

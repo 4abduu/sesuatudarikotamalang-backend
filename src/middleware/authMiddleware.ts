@@ -19,10 +19,16 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   }
 
   const token = header.split(" ")[1];
-  try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET || "") as JwtPayload;
+  let payload: JwtPayload;
 
-    // Ambil data user & role terbaru langsung dari DB untuk mencegah klaim JWT basi (misal baru diapprove jadi creator)
+  try {
+    payload = jwt.verify(token, process.env.JWT_SECRET || "") as JwtPayload;
+  } catch (err) {
+    return res.status(401).json({ error: "Token tidak valid atau kadaluarsa" });
+  }
+
+  try {
+    // Ambil data user & role terbaru langsung dari DB untuk mencegah klaim JWT basi
     const dbUser = await prisma.user.findUnique({
       where: { id: payload.id },
       select: { id: true, name: true, email: true, role: true, avatarUrl: true },
@@ -34,8 +40,9 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
 
     req.user = dbUser;
     next();
-  } catch (err) {
-    return res.status(401).json({ error: "Token tidak valid atau kadaluarsa" });
+  } catch (dbErr) {
+    // F-26: Pisahkan error DB dari error JWT agar tidak membingungkan klien (misal kirim 500 jika DB bermasalah)
+    next(dbErr);
   }
 }
 

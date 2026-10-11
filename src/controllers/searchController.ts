@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import prisma from "../lib/prisma";
+import { attachEffectiveStockToVariants } from "../lib/stock";
 
 // GET /api/search — Search produk dan kreator untuk mobile/customer (query: ?q=)
 export const search = async (req: Request, res: Response, next: NextFunction) => {
@@ -14,6 +15,7 @@ export const search = async (req: Request, res: Response, next: NextFunction) =>
       prisma.product.findMany({
         where: {
           isActive: true,
+          artisan: { status: "aktif" }, // F-13: filter kreator aktif saja
           OR: [
             { name: { contains: q } },
             { shortDescription: { contains: q } },
@@ -46,7 +48,18 @@ export const search = async (req: Request, res: Response, next: NextFunction) =>
       }),
     ]);
 
-    res.json({ products, creators });
+    // F-25: Lampirkan effectiveStock ke tiap varian produk di pencarian
+    const productsWithStock = await Promise.all(
+      products.map(async (p) => {
+        const variantsWithStock = await attachEffectiveStockToVariants(p.variants);
+        return {
+          ...p,
+          variants: variantsWithStock,
+        };
+      })
+    );
+
+    res.json({ products: productsWithStock, creators });
   } catch (err) {
     next(err);
   }

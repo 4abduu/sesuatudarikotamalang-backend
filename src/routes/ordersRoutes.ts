@@ -16,4 +16,8 @@ router.post("/", requireAuth, ordersController.createOrder);
 // PATCH /api/orders/:id/cancel — Pembatalan manual (Buyer hanya bisa batalkan order milik sendiri yang belum lunas)
 router.patch("/:id/cancel", requireAuth, ordersController.cancelOrder);
 
+// POST /api/orders/:id/pay — F-16: Minta token bayar ulang Midtrans
+router.post("/:id/pay", requireAuth, ordersController.repayOrder);
+
 export default router;
+

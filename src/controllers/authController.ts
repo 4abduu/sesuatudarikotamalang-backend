@@ -139,10 +139,11 @@ export const googleLogin = async (req: Request, res: Response, next: NextFunctio
         },
       });
     } else if (user.authProvider === "email") {
-      // Jika sebelumnya daftar via email biasa, update authProvider jadi "both"
+      // F-09: Jika sebelumnya daftar via email biasa dan login via Google, set passwordHash = null
+      // agar penyerang yang sempat mendaftarkan email korban tidak bisa mengakses akun setelah korban login Google.
       user = await prisma.user.update({
         where: { id: user.id },
-        data: { authProvider: "both" },
+        data: { authProvider: "both", passwordHash: null },
       });
     }
 
@@ -270,9 +271,21 @@ export const changeEmailRequest = async (req: Request, res: Response, next: Next
       return res.status(401).json({ error: "Belum login" });
     }
 
-    const { newEmail } = req.body;
-    if (!newEmail || typeof newEmail !== "string") {
-      return res.status(400).json({ error: "newEmail wajib diisi" });
+    const { newEmail, password } = req.body;
+    if (!newEmail || typeof newEmail !== "string" || !password || typeof password !== "string") {
+      return res.status(400).json({ error: "newEmail dan password wajib diisi" });
+    }
+
+    const currentUser = await prisma.user.findUnique({ where: { id: req.user.id } });
+    if (!currentUser) {
+      return res.status(404).json({ error: "User tidak ditemukan" });
+    }
+
+    if (currentUser.passwordHash) {
+      const match = await bcrypt.compare(password, currentUser.passwordHash);
+      if (!match) {
+        return res.status(401).json({ error: "Password konfirmasi salah" });
+      }
     }
 
     if (newEmail === req.user.email) {
@@ -340,6 +353,11 @@ export const changeEmailVerify = async (req: Request, res: Response, next: NextF
 
     if (!otpRecord || !otpRecord.targetEmail) {
       return res.status(400).json({ error: "Kode OTP tidak valid atau sudah kedaluwarsa" });
+    }
+
+    const existingEmailUser = await prisma.user.findUnique({ where: { email: otpRecord.targetEmail } });
+    if (existingEmailUser) {
+      return res.status(409).json({ error: "Email baru sudah digunakan oleh akun lain" });
     }
 
     await prisma.user.update({

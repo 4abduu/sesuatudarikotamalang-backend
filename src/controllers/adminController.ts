@@ -4,11 +4,12 @@ import prisma from "../lib/prisma";
 // GET /api/admin/dashboard — ringkasan statcard + data grafik dashboard admin
 export const getDashboard = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-
-    const endOfDay = new Date();
-    endOfDay.setHours(23, 59, 59, 999);
+    // F-20: Hitung "hari ini" berdasarkan WIB (UTC+7) agar tidak bergeser di server UTC
+    const WIB_OFFSET_MS = 7 * 60 * 60 * 1000;
+    const nowWIB = new Date(Date.now() + WIB_OFFSET_MS);
+    const startOfDayWIB = new Date(Date.UTC(nowWIB.getUTCFullYear(), nowWIB.getUTCMonth(), nowWIB.getUTCDate()));
+    const startOfDay = new Date(startOfDayWIB.getTime() - WIB_OFFSET_MS);
+    const endOfDay = new Date(startOfDay.getTime() + 86400000 - 1);
 
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
@@ -283,6 +284,11 @@ export const updateOrderStatus = async (req: Request, res: Response, next: NextF
 
     const oldStatus = order.status;
 
+    // F-17: Batasi transisi status yang tidak valid
+    if (["dibatalkan", "kedaluwarsa"].includes(oldStatus) && status === "lunas") {
+      return res.status(400).json({ error: `Pesanan yang sudah ${oldStatus} tidak dapat langsung diubah menjadi lunas` });
+    }
+
     const updatedOrder = await prisma.$transaction(async (tx) => {
       // 1. Jika pindah ke 'lunas' dan pickupDeadline belum ada, hitung pickupDeadline
       let pickupDeadline = order.pickupDeadline;
@@ -488,20 +494,37 @@ export const updateSettings = async (req: Request, res: Response, next: NextFunc
   try {
     const { holdDurationMinutes, autoCancelEnabled, pickupDeadlineDays, whatsappAdminNumber, notificationEmail } = req.body;
 
+    // F-23: Validasi rentang angka
+    let parsedHold: number | undefined = undefined;
+    if (holdDurationMinutes !== undefined) {
+      parsedHold = parseInt(holdDurationMinutes);
+      if (isNaN(parsedHold) || parsedHold < 15 || parsedHold > 1440) {
+        return res.status(400).json({ error: "holdDurationMinutes harus berupa angka antara 15 dan 1440 menit" });
+      }
+    }
+
+    let parsedDeadline: number | undefined = undefined;
+    if (pickupDeadlineDays !== undefined) {
+      parsedDeadline = parseInt(pickupDeadlineDays);
+      if (isNaN(parsedDeadline) || ![7, 14, 30].includes(parsedDeadline)) {
+        return res.status(400).json({ error: "pickupDeadlineDays harus bernilai 7, 14, atau 30 hari" });
+      }
+    }
+
     const settings = await prisma.appSettings.upsert({
       where: { id: 1 },
       create: {
         id: 1,
-        ...(holdDurationMinutes !== undefined && { holdDurationMinutes: parseInt(holdDurationMinutes) }),
+        ...(parsedHold !== undefined && { holdDurationMinutes: parsedHold }),
         ...(autoCancelEnabled !== undefined && { autoCancelEnabled: Boolean(autoCancelEnabled) }),
-        ...(pickupDeadlineDays !== undefined && { pickupDeadlineDays: parseInt(pickupDeadlineDays) }),
+        ...(parsedDeadline !== undefined && { pickupDeadlineDays: parsedDeadline }),
         ...(whatsappAdminNumber !== undefined && { whatsappAdminNumber }),
         ...(notificationEmail !== undefined && { notificationEmail }),
       },
       update: {
-        ...(holdDurationMinutes !== undefined && { holdDurationMinutes: parseInt(holdDurationMinutes) }),
+        ...(parsedHold !== undefined && { holdDurationMinutes: parsedHold }),
         ...(autoCancelEnabled !== undefined && { autoCancelEnabled: Boolean(autoCancelEnabled) }),
-        ...(pickupDeadlineDays !== undefined && { pickupDeadlineDays: parseInt(pickupDeadlineDays) }),
+        ...(parsedDeadline !== undefined && { pickupDeadlineDays: parsedDeadline }),
         ...(whatsappAdminNumber !== undefined && { whatsappAdminNumber }),
         ...(notificationEmail !== undefined && { notificationEmail }),
       },

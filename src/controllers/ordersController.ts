@@ -92,6 +92,16 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
 
     const userId = req.user.id;
 
+    // F-07: Batasi jumlah order menunggu_bayar aktif per user (max 3)
+    const activeOrderCount = await prisma.order.count({
+      where: { userId, status: "menunggu_bayar" },
+    });
+    if (activeOrderCount >= 3) {
+      return res.status(429).json({
+        error: "Kamu sudah memiliki 3 pesanan aktif yang belum dibayar. Selesaikan atau batalkan pesanan lama terlebih dahulu.",
+      });
+    }
+
     // Pengecekan dan pembuatan order dilakukan dalam SATU transaksi database (Atomic)
     const newOrder = await prisma.$transaction(
       async (tx) => {
@@ -106,6 +116,11 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
 
       if (!product || !product.isActive) {
         throw { status: 404, message: "Produk tidak ditemukan atau sedang tidak aktif" };
+      }
+
+      // F-13: Blokir pemesanan produk milik kreator nonaktif
+      if (product.artisan && product.artisan.status !== "aktif") {
+        throw { status: 403, message: "Produk ini tidak tersedia karena kreator sedang nonaktif" };
       }
 
       // 2. Validasi larangan membeli produk sendiri
@@ -298,9 +313,88 @@ export const cancelOrder = async (req: Request, res: Response, next: NextFunctio
   }
 };
 
+// POST /api/orders/:id/pay — F-16: Dapatkan/minta ulang token pembayaran Snap Midtrans untuk order yang belum dibayar
+export const repayOrder = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: "Belum login" });
+    }
+
+    const { id } = req.params;
+
+    const order = await prisma.order.findUnique({ where: { id } });
+    if (!order) {
+      return res.status(404).json({ error: "Pesanan tidak ditemukan" });
+    }
+
+    if (order.userId !== req.user.id && req.user.role !== "admin") {
+      return res.status(403).json({ error: "Tidak memiliki akses ke pesanan ini" });
+    }
+
+    if (order.paymentMethod !== "midtrans") {
+      return res.status(400).json({ error: "Pesanan ini tidak menggunakan metode pembayaran Midtrans" });
+    }
+
+    if (order.status !== "menunggu_bayar") {
+      return res.status(400).json({ error: `Pesanan berstatus ${order.status}, tidak dapat diproses pembayarannya` });
+    }
+
+    if (order.holdExpiresAt && new Date() > new Date(order.holdExpiresAt)) {
+      return res.status(400).json({ error: "Waktu pembayaran pesanan ini telah kedaluwarsa" });
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+
+    const transactionDetails = {
+      transaction_details: {
+        order_id: order.orderNumber,
+        gross_amount: order.totalAmount,
+      },
+      expiry: {
+        unit: "minute",
+        duration: 60,
+      },
+      customer_details: {
+        first_name: user ? user.name : "Customer",
+        email: user ? user.email : "customer@example.com",
+      },
+    };
+
+    const transaction = await snap.createTransaction(transactionDetails);
+
+    // Simpan atau update record payment
+    const existingPayment = await prisma.payment.findFirst({ where: { orderId: order.id } });
+    if (existingPayment) {
+      await prisma.payment.update({
+        where: { id: existingPayment.id },
+        data: { midtransTransactionId: transaction.token },
+      });
+    } else {
+      await prisma.payment.create({
+        data: {
+          orderId: order.id,
+          midtransTransactionId: transaction.token,
+          status: "pending",
+        },
+      });
+    }
+
+    res.json({
+      snap: {
+        token: transaction.token,
+        redirect_url: transaction.redirect_url,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 export default {
   listOrders,
   getOrderById,
   createOrder,
   cancelOrder,
+  repayOrder,
 };
+
