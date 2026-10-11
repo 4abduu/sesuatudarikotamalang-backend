@@ -40,7 +40,7 @@ import slotsRoutes from "./routes/slotsRoutes";
 const app = express();
 
 // F-04: Trust proxy di belakang reverse proxy (Railway, Render, Nginx)
-if (process.env.TRUST_PROXY) {
+if (process.env.TRUST_PROXY && process.env.TRUST_PROXY !== "false" && process.env.TRUST_PROXY !== "0") {
   const trustValue = process.env.TRUST_PROXY === "true" ? 1 : isNaN(Number(process.env.TRUST_PROXY)) ? process.env.TRUST_PROXY : Number(process.env.TRUST_PROXY);
   app.set("trust proxy", trustValue);
 }
