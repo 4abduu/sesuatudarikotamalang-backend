@@ -19,21 +19,41 @@ export const getSlots = async (req: Request, res: Response, next: NextFunction) 
     const dayStart = new Date(date + "T00:00:00+07:00");
     const dayEnd = new Date(dayStart.getTime() + 86400000 - 1);
 
+    // Ambil setting autoCancelEnabled
+    const settings = await prisma.appSettings.findUnique({ where: { id: 1 } });
+    const autoCancelEnabled = settings?.autoCancelEnabled ?? true;
+
     // Hitung order yang menempati slot pada tanggal tersebut
-    // Termasuk: menunggu_bayar (yang hold masih hidup), lunas, selesai
+    // Termasuk: lunas, selesai, dan menunggu_bayar
     const now = new Date();
+    const activeConditions: any[] = [
+      { status: "lunas" },
+      { status: "selesai" },
+      {
+        status: "menunggu_bayar",
+        paymentMethod: "midtrans",
+        holdExpiresAt: { gt: now },
+      },
+    ];
+
+    if (autoCancelEnabled) {
+      activeConditions.push({
+        status: "menunggu_bayar",
+        paymentMethod: "cod",
+        holdExpiresAt: { gt: now },
+      });
+    } else {
+      activeConditions.push({
+        status: "menunggu_bayar",
+        paymentMethod: "cod",
+      });
+    }
+
     const slotCounts = await prisma.order.groupBy({
       by: ["pickupSlot"],
       where: {
         pickupDate: { gte: dayStart, lte: dayEnd },
-        OR: [
-          { status: "lunas" },
-          { status: "selesai" },
-          {
-            status: "menunggu_bayar",
-            holdExpiresAt: { gt: now },
-          },
-        ],
+        OR: activeConditions,
       },
       _count: { _all: true },
     });
@@ -56,7 +76,7 @@ export const getSlots = async (req: Request, res: Response, next: NextFunction) 
       };
     });
 
-    res.json({ slots });
+    res.json({ date, slots });
   } catch (err) {
     next(err);
   }

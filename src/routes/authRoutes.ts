@@ -37,4 +37,8 @@ router.post("/change-password", requireAuth, authController.changePassword);
 // GET /api/auth/me — Cek profil user yang sedang login
 router.get("/me", requireAuth, authController.getMe);
 
+// PUT /api/auth/profile — Update profil (nama, avatarUrl) user yang sedang login
+router.put("/profile", requireAuth, authController.updateProfile);
+
 export default router;
+

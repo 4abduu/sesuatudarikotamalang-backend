@@ -12,7 +12,7 @@ export function getPickupSlots(): string[] {
   if (raw && raw.trim()) {
     return raw.split(",").map((s) => s.trim()).filter(Boolean);
   }
-  return ["10:00", "11:00", "13:00", "15:00", "17:00", "10:00-12:00", "13:00-15:00", "15:00-17:00"];
+  return ["10:00", "11:00", "13:00", "15:00", "17:00"];
 }
 
 /**

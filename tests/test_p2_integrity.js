@@ -117,14 +117,17 @@ async function runP2Tests() {
   // ═══════════════════════════════════════════
   console.log("[F-02] Uji Konkurensi createOrder (5 Order Paralel untuk Stok = 1)");
 
+  const tomorrow = new Date(Date.now() + 86400000);
+  const tomorrowStr = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, "0")}-${String(tomorrow.getDate()).padStart(2, "0")}`;
+
   const requests = Array.from({ length: 5 }).map((_, idx) => {
     const req = {
       user: idx % 2 === 0 ? testUser1 : testUser2,
       body: {
         productId: testProduct.id,
         variantId: testVariant.id,
-        pickupDate: new Date().toISOString(),
-        pickupSlot: "10:00-12:00",
+        pickupDate: tomorrowStr,
+        pickupSlot: "10:00",
         paymentMethod: "cod",
       },
     };

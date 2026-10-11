@@ -444,6 +444,86 @@ export const getMe = async (req: Request, res: Response, next: NextFunction) => 
   }
 };
 
+// PUT /api/auth/profile — Update nama dan avatarUrl pengguna yang login
+export const updateProfile = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: "Belum login" });
+    }
+
+    const { name, avatarUrl } = req.body;
+
+    // Minimal satu field harus disediakan
+    if (name === undefined && avatarUrl === undefined) {
+      return res.status(400).json({ error: "Minimal salah satu dari name atau avatarUrl harus diisi" });
+    }
+
+    const updateData: { name?: string; avatarUrl?: string | null } = {};
+
+    // Validasi name jika disediakan
+    if (name !== undefined) {
+      if (typeof name !== "string") {
+        return res.status(400).json({ error: "Format nama harus berupa string" });
+      }
+      const trimmedName = name.trim();
+      // Panjang 2-80 karakter, tidak mengandung karakter kontrol ASCII (\x00-\x1F, \x7F)
+      if (trimmedName.length < 2 || trimmedName.length > 80) {
+        return res.status(400).json({ error: "Nama harus berukuran 2 sampai 80 karakter" });
+      }
+      // Karakter kontrol check
+      if (/[\x00-\x1F\x7F]/.test(trimmedName)) {
+        return res.status(400).json({ error: "Nama tidak boleh memuat karakter kontrol" });
+      }
+      updateData.name = trimmedName;
+    }
+
+    // Validasi avatarUrl jika disediakan
+    if (avatarUrl !== undefined) {
+      if (avatarUrl === null) {
+        updateData.avatarUrl = null;
+      } else if (typeof avatarUrl === "string") {
+        const trimmedAvatar = avatarUrl.trim();
+        if (trimmedAvatar.length > 191) {
+          return res.status(400).json({ error: "avatarUrl maksimal 191 karakter" });
+        }
+
+        // Tentukan base URL upload yang valid
+        const publicBase = process.env.PUBLIC_BASE_URL ? process.env.PUBLIC_BASE_URL.replace(/\/+$/, "") : "";
+        const reqBase = `${req.protocol}://${req.get("host")}`;
+
+        const isValidLocal =
+          (publicBase && trimmedAvatar.startsWith(`${publicBase}/uploads/`)) ||
+          trimmedAvatar.startsWith(`${reqBase}/uploads/`) ||
+          trimmedAvatar.startsWith("/uploads/");
+
+        if (!isValidLocal) {
+          return res.status(400).json({ error: "avatarUrl harus merupakan URL upload server lokal" });
+        }
+
+        updateData.avatarUrl = trimmedAvatar;
+      } else {
+        return res.status(400).json({ error: "Format avatarUrl harus berupa string atau null" });
+      }
+    }
+
+    const updatedUser = await prisma.user.update({
+      where: { id: req.user.id },
+      data: updateData,
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        avatarUrl: true,
+      },
+    });
+
+    res.json({ user: updatedUser });
+  } catch (err) {
+    next(err);
+  }
+};
+
 export default {
   register,
   login,
@@ -454,4 +534,6 @@ export default {
   changeEmailVerify,
   changePassword,
   getMe,
+  updateProfile,
 };
+

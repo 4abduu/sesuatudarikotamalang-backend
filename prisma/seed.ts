@@ -35,11 +35,17 @@ async function main() {
   console.log("✅ 8 Kategori berhasil disiapkan.");
 
   // 2. AKUN PENGGUNA (Admin, Buyer, 3 Kreator)
-  const defaultPassword = await bcrypt.hash("Password123!", 10);
-  const adminPassword = process.env.SEED_ADMIN_PASSWORD
-    ? await bcrypt.hash(process.env.SEED_ADMIN_PASSWORD, 10)
-    : defaultPassword;
-  const adminEmail = process.env.SEED_ADMIN_EMAIL || "admin@sesuatudarikota.com";
+  // Menolak hardcoded kredensial admin: wajib dari SEED_ADMIN_EMAIL dan SEED_ADMIN_PASSWORD
+  const adminEmail = process.env.SEED_ADMIN_EMAIL;
+  const adminRawPassword = process.env.SEED_ADMIN_PASSWORD;
+
+  if (!adminEmail || !adminRawPassword) {
+    console.error("Seed ditolak: SEED_ADMIN_EMAIL dan SEED_ADMIN_PASSWORD wajib didefinisikan di environment!");
+    process.exit(1);
+  }
+
+  const adminPassword = await bcrypt.hash(adminRawPassword, 10);
+  const defaultPassword = await bcrypt.hash(adminRawPassword, 10);
 
   const admin = await prisma.user.upsert({
     where: { email: adminEmail },
@@ -53,7 +59,7 @@ async function main() {
     },
   });
 
-  const buyerEmail = process.env.SEED_BUYER_EMAIL || "buyer@sesuatudarikota.com";
+  const buyerEmail = process.env.SEED_BUYER_EMAIL || "buyer@test.com";
   const buyer = await prisma.user.upsert({
     where: { email: buyerEmail },
     update: {},

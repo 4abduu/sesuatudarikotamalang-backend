@@ -117,48 +117,81 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
 
     const userId = req.user.id;
 
-    // F-07: Batasi jumlah order menunggu_bayar aktif per user (max 3)
-    const settings = await prisma.appSettings.findUnique({ where: { id: 1 } });
-    const autoCancel = settings?.autoCancelEnabled ?? true;
-    const nowCheck = new Date();
-
-    const activeOrderCount = await prisma.order.count({
-      where: {
-        userId,
-        status: "menunggu_bayar",
-        OR: [
-          { holdExpiresAt: { gt: nowCheck } },
-          ...(autoCancel ? [] : [{ paymentMethod: "cod" as any }]),
-        ],
-      },
-    });
-    if (activeOrderCount >= 3) {
-      return res.status(429).json({
-        error: "Kamu sudah memiliki 3 pesanan aktif yang belum dibayar. Selesaikan atau batalkan pesanan lama terlebih dahulu.",
-      });
-    }
-
     // Pengecekan dan pembuatan order dilakukan dalam SATU transaksi database (Atomic)
+    // F-07 (batas order aktif) dan A8 (kapasitas slot) dipindahkan ke dalam transaksi
+    // agar race condition antar request konkuren tidak bisa mem-bypass batas.
     const newOrder = await prisma.$transaction(
       async (tx) => {
+      // Lock baris AppSettings untuk serialisasi pemeriksaan batas
+      const settingsRows: any[] = await tx.$queryRaw`SELECT * FROM app_settings WHERE id = 1 FOR UPDATE`;
+      const settings = settingsRows[0] ?? null;
+      const autoCancel = settings?.autoCancelEnabled ?? true;
+      const txNow = new Date();
+
+      // F-07: Batasi jumlah order menunggu_bayar aktif per user (max 3)
+      const activeConditionsUser: any[] = [
+        {
+          status: "menunggu_bayar" as const,
+          paymentMethod: "midtrans" as const,
+          holdExpiresAt: { gt: txNow },
+        },
+      ];
+      if (autoCancel) {
+        activeConditionsUser.push({
+          status: "menunggu_bayar" as const,
+          paymentMethod: "cod" as const,
+          holdExpiresAt: { gt: txNow },
+        });
+      } else {
+        // autoCancelEnabled=false: COD menunggu_bayar tetap dianggap aktif walau hold sudah habis
+        activeConditionsUser.push({
+          status: "menunggu_bayar" as const,
+          paymentMethod: "cod" as const,
+        });
+      }
+
+      const activeOrderCount = await tx.order.count({
+        where: {
+          userId,
+          OR: activeConditionsUser,
+        },
+      });
+      if (activeOrderCount >= 3) {
+        throw { status: 429, message: "Kamu sudah memiliki 3 pesanan aktif yang belum dibayar. Selesaikan atau batalkan pesanan lama terlebih dahulu." };
+      }
+
       // A8: Validasi kapasitas slot DI DALAM transaksi (mencegah race condition)
       const slotCapacity = getSlotCapacity();
       const pickupDayStart = new Date(pickupDateStr + "T00:00:00+07:00");
       const pickupDayEnd = new Date(pickupDayStart.getTime() + 86400000 - 1);
-      const txNow = new Date();
+
+      const slotConditions: any[] = [
+        { status: "lunas" as const },
+        { status: "selesai" as const },
+        {
+          status: "menunggu_bayar" as const,
+          paymentMethod: "midtrans" as const,
+          holdExpiresAt: { gt: txNow },
+        },
+      ];
+      if (autoCancel) {
+        slotConditions.push({
+          status: "menunggu_bayar" as const,
+          paymentMethod: "cod" as const,
+          holdExpiresAt: { gt: txNow },
+        });
+      } else {
+        slotConditions.push({
+          status: "menunggu_bayar" as const,
+          paymentMethod: "cod" as const,
+        });
+      }
 
       const bookedCount = await tx.order.count({
         where: {
           pickupDate: { gte: pickupDayStart, lte: pickupDayEnd },
           pickupSlot: pickupSlot,
-          OR: [
-            { status: "lunas" },
-            { status: "selesai" },
-            {
-              status: "menunggu_bayar",
-              holdExpiresAt: { gt: txNow },
-            },
-          ],
+          OR: slotConditions,
         },
       });
 
@@ -219,10 +252,10 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
         throw { status: 409, message: "Maaf, stok produk ini baru saja habis" };
       }
 
-      // 4. Ambil Pengaturan Sistem (AppSettings)
-      let settings = await tx.appSettings.findUnique({ where: { id: 1 } });
+      // 4. AppSettings sudah diambil di atas (settingsRows) via FOR UPDATE
+      // Jika belum ada, buat baris default
       if (!settings) {
-        settings = await tx.appSettings.create({ data: { id: 1 } });
+        await tx.appSettings.create({ data: { id: 1 } });
       }
 
       // 5. Generate Order Number Unik (SDK-XXXX) dengan retry loop untuk mencegah collision
@@ -245,12 +278,12 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
       const now = new Date();
 
       // Durasi Hold (COD default 120 menit; Midtrans hold 60 menit agar tidak menahan stok tanpa batas)
-      const holdMinutes = isMidtrans ? 60 : (settings.holdDurationMinutes || 120);
+      const holdMinutes = isMidtrans ? 60 : (settings?.holdDurationMinutes || 120);
       const holdExpiresAt = new Date(now.getTime() + holdMinutes * 60000);
 
       // Batas Pengambilan untuk Midtrans Lunas (Default 14 hari)
       const pickupDeadline = isMidtrans
-        ? new Date(new Date(pickupDate).getTime() + (settings.pickupDeadlineDays || 14) * 86400000)
+        ? new Date(new Date(pickupDate).getTime() + (settings?.pickupDeadlineDays || 14) * 86400000)
         : null;
 
       // 6. Buat Record Order + OrderItem
@@ -406,6 +439,12 @@ export const repayOrder = async (req: Request, res: Response, next: NextFunction
       return res.status(400).json({ error: "Waktu pembayaran pesanan ini telah kedaluwarsa" });
     }
 
+    // Hitung sisa menit hold untuk expiry Midtrans
+    const remainingMs = order.holdExpiresAt
+      ? new Date(order.holdExpiresAt).getTime() - Date.now()
+      : 60 * 60000; // fallback 60 menit jika tidak ada holdExpiresAt
+    const expiryMinutes = Math.max(1, Math.ceil(remainingMs / 60000));
+
     const user = await prisma.user.findUnique({ where: { id: req.user.id } });
 
     const transactionDetails = {
@@ -414,8 +453,8 @@ export const repayOrder = async (req: Request, res: Response, next: NextFunction
         gross_amount: order.totalAmount,
       },
       expiry: {
-        unit: "minute",
-        duration: 60,
+        unit: "minute" as const,
+        duration: expiryMinutes,
       },
       customer_details: {
         first_name: user ? user.name : "Customer",
@@ -423,7 +462,26 @@ export const repayOrder = async (req: Request, res: Response, next: NextFunction
       },
     };
 
-    const transaction = await snap.createTransaction(transactionDetails);
+    let transaction: any;
+    try {
+      transaction = await snap.createTransaction(transactionDetails);
+    } catch (midtransErr: any) {
+      // Tangkap error Midtrans "order_id sudah dipakai" / 4xx duplicate
+      const errMsg = midtransErr?.message || midtransErr?.ApiResponse?.status_message || "";
+      const errStatus = midtransErr?.httpStatusCode || midtransErr?.statusCode || 0;
+      if (
+        errStatus === 400 || errStatus === 409 ||
+        /order_id (has been|already|sudah)/i.test(errMsg) ||
+        /duplicate|already (paid|used|exist)/i.test(errMsg)
+      ) {
+        return res.status(409).json({
+          error: "Pembayaran untuk pesanan ini sudah dibuat. Selesaikan lewat instruksi pembayaran sebelumnya atau tunggu hingga kedaluwarsa.",
+          code: "PAYMENT_ALREADY_CREATED",
+        });
+      }
+      // Error Midtrans lain: rethrow
+      throw midtransErr;
+    }
 
     // Simpan atau update record payment
     const existingPayment = await prisma.payment.findFirst({ where: { orderId: order.id } });
