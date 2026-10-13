@@ -5,6 +5,7 @@ import prisma from "../lib/prisma";
 export interface JwtPayload {
   id: string;
   role?: string;
+  iat?: number;
   [key: string]: any;
 }
 
@@ -31,14 +32,21 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     // Ambil data user & role terbaru langsung dari DB untuk mencegah klaim JWT basi
     const dbUser = await prisma.user.findUnique({
       where: { id: payload.id },
-      select: { id: true, name: true, email: true, role: true, avatarUrl: true },
+      select: { id: true, name: true, email: true, role: true, avatarUrl: true, updatedAt: true },
     });
 
     if (!dbUser) {
       return res.status(401).json({ error: "User sudah tidak terdaftar di sistem" });
     }
 
-    req.user = dbUser;
+    // F-26: perubahan akun mencabut token yang diterbitkan sebelumnya.
+    // Perbandingan memakai detik karena JWT iat tidak menyimpan milidetik.
+    if (payload.iat && Math.floor(dbUser.updatedAt.getTime() / 1000) > payload.iat) {
+      return res.status(401).json({ error: "Sesi kedaluwarsa setelah perubahan akun" });
+    }
+
+    const { updatedAt: _updatedAt, ...user } = dbUser;
+    req.user = user;
     next();
   } catch (dbErr) {
     // F-26: Pisahkan error DB dari error JWT agar tidak membingungkan klien (misal kirim 500 jika DB bermasalah)

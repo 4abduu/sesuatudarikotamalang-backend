@@ -184,12 +184,15 @@ export const applyConsignment = async (req: Request, res: Response, next: NextFu
       return res.status(401).json({ error: "Belum login" });
     }
 
-    const { applicantName, contact, brandName, categoryId, description, sampleFileUrl } = req.body;
+    const { applicantName, contact, brandName, categoryId, description, sampleFileUrl, samplePhotos } = req.body;
 
     if (!applicantName || !contact || !brandName || !description) {
       return res.status(400).json({
         error: "applicantName, contact, brandName, dan description wajib diisi",
       });
+    }
+    if (samplePhotos !== undefined && (!Array.isArray(samplePhotos) || samplePhotos.some((photo) => typeof photo !== "string"))) {
+      return res.status(400).json({ error: "samplePhotos harus berupa array URL" });
     }
 
     // F-19: Hanya buyer yang boleh mengajukan konsinyasi
@@ -218,7 +221,8 @@ export const applyConsignment = async (req: Request, res: Response, next: NextFu
         brandName,
         categoryId,
         description,
-        sampleFileUrl,
+        sampleFileUrl: samplePhotos?.[0] || sampleFileUrl,
+        samplePhotos: samplePhotos === undefined ? undefined : samplePhotos,
         status: "pending",
       },
     });

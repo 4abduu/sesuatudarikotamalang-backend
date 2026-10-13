@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from "express";
+import crypto from "crypto";
 import prisma from "../lib/prisma";
 import { cartesianProduct } from "../lib/variants";
 import { attachEffectiveStockToVariants } from "../lib/stock";
@@ -9,8 +10,23 @@ function createSlug(name: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "");
-  const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+  const randomSuffix = crypto.randomInt(1000, 10000);
   return `${base}-${randomSuffix}`;
+}
+
+function isHttpsUrl(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function validateProductImages(images: unknown): string[] | null {
+  if (images === undefined) return [];
+  if (!Array.isArray(images) || images.some((image) => !isHttpsUrl(image))) return null;
+  return images;
 }
 
 // GET /api/products — list semua produk aktif (dukung filter categoryId, search, sort)
@@ -18,8 +34,20 @@ export const listProducts = async (req: Request, res: Response, next: NextFuncti
   try {
     const { categoryId, category, search, sort, page, limit } = req.query;
 
-    const parsedPage = typeof page === "string" && !isNaN(parseInt(page)) && parseInt(page) > 0 ? parseInt(page) : undefined;
-    const parsedLimit = typeof limit === "string" && !isNaN(parseInt(limit)) && parseInt(limit) > 0 ? parseInt(limit) : undefined;
+    for (const [name, value] of Object.entries({ categoryId, category, search, sort, page, limit })) {
+      if (value !== undefined && typeof value !== "string") {
+        return res.status(400).json({ error: `${name} harus berupa string` });
+      }
+    }
+    if (sort !== undefined && !["termurah", "termahal", "terlaris", "terpopuler"].includes(sort as string)) {
+      return res.status(400).json({ error: "sort tidak valid" });
+    }
+
+    const parsedPage = typeof page === "string" && /^\d+$/.test(page) && parseInt(page, 10) > 0 ? parseInt(page, 10) : undefined;
+    const parsedLimit = typeof limit === "string" && /^\d+$/.test(limit) && parseInt(limit, 10) > 0 ? parseInt(limit, 10) : undefined;
+    if ((page !== undefined && parsedPage === undefined) || (limit !== undefined && parsedLimit === undefined)) {
+      return res.status(400).json({ error: "page dan limit harus berupa bilangan bulat positif" });
+    }
 
     const where: any = {
       isActive: true,
@@ -132,12 +160,6 @@ export const getProductById = async (req: Request, res: Response, next: NextFunc
   try {
     const { id } = req.params;
 
-    // Increment viewCount secara async
-    await prisma.product.update({
-      where: { id },
-      data: { viewCount: { increment: 1 } },
-    }).catch(() => {}); // abaikan jika ID tidak ketemu di tahap increment ini
-
     const product = await prisma.product.findUnique({
       where: { id },
       include: {
@@ -163,6 +185,11 @@ export const getProductById = async (req: Request, res: Response, next: NextFunc
     if (!product || !product.isActive || product.artisan.status !== "aktif") {
       return res.status(404).json({ error: "Produk tidak ditemukan atau tidak aktif" });
     }
+
+    await prisma.product.update({
+      where: { id },
+      data: { viewCount: { increment: 1 } },
+    });
 
     const variantsWithStock = await attachEffectiveStockToVariants(product.variants);
 
@@ -205,9 +232,41 @@ export const createProduct = async (req: Request, res: Response, next: NextFunct
       variantStocks,  // opsional: array of { combination: ["Ubin"], stock: 10 }
     } = req.body;
 
-    const parsedPrice = parseInt(price);
-    if (isNaN(parsedPrice) || parsedPrice <= 0) {
+    const parsedPrice = typeof price === "number" && Number.isInteger(price)
+      ? price
+      : typeof price === "string" && /^\d+$/.test(price) ? Number(price) : NaN;
+    if (!Number.isInteger(parsedPrice) || parsedPrice <= 0) {
       return res.status(400).json({ error: "price harus berupa angka bulat positif" });
+    }
+    if (typeof name !== "string" || !name.trim() || typeof description !== "string" || !description.trim()) {
+      return res.status(400).json({ error: "name dan description wajib berupa teks" });
+    }
+    if (typeof categoryId !== "string" || !categoryId) {
+      return res.status(400).json({ error: "categoryId wajib berupa string" });
+    }
+    if (isLimited !== undefined && typeof isLimited !== "boolean") {
+      return res.status(400).json({ error: "isLimited harus berupa boolean" });
+    }
+    const parsedImages = validateProductImages(images);
+    if (parsedImages === null) {
+      return res.status(400).json({ error: "images harus berupa array URL HTTPS" });
+    }
+    if (shopeeUrl !== undefined && shopeeUrl !== null && !isHttpsUrl(shopeeUrl)) {
+      return res.status(400).json({ error: "shopeeUrl harus berupa URL HTTPS" });
+    }
+    if (!Array.isArray(variantOptions) && variantOptions !== undefined) {
+      return res.status(400).json({ error: "variantOptions harus berupa array" });
+    }
+    if (Array.isArray(variantOptions) && variantOptions.some((option) =>
+      !option || typeof option.name !== "string" || !option.name.trim() ||
+      !Array.isArray(option.values) || option.values.some((value: unknown) => typeof value !== "string" || !value.trim())
+    )) {
+      return res.status(400).json({ error: "Setiap opsi varian harus memiliki name dan values berupa array teks" });
+    }
+
+    const category = await prisma.category.findUnique({ where: { id: categoryId } });
+    if (!category) {
+      return res.status(404).json({ error: "Kategori tidak ditemukan" });
     }
 
     // Cari artisanId pengunggah
@@ -231,8 +290,6 @@ export const createProduct = async (req: Request, res: Response, next: NextFunct
     }
 
     const slug = createSlug(name);
-    const parsedImages = Array.isArray(images) ? images : [];
-
     // Buat produk + variantOptions + variants dalam satu transaksi
     const newProduct = await prisma.$transaction(async (tx) => {
       const product = await tx.product.create({
@@ -245,7 +302,7 @@ export const createProduct = async (req: Request, res: Response, next: NextFunct
           description,
           price: parsedPrice,
           images: parsedImages,
-          isLimited: Boolean(isLimited),
+          isLimited: isLimited === true,
           shopeeUrl,
         },
       });
@@ -365,6 +422,31 @@ export const updateProduct = async (req: Request, res: Response, next: NextFunct
       variantStocks, // array of { id: "variantId", stock: 15 }
     } = req.body;
 
+    if (price !== undefined) {
+      const parsedPrice = typeof price === "number" && Number.isInteger(price)
+        ? price
+        : typeof price === "string" && /^\d+$/.test(price) ? Number(price) : NaN;
+      if (!Number.isInteger(parsedPrice) || parsedPrice <= 0) {
+        return res.status(400).json({ error: "price harus berupa angka bulat positif" });
+      }
+    }
+    if (categoryId !== undefined) {
+      if (typeof categoryId !== "string" || !categoryId) {
+        return res.status(400).json({ error: "categoryId harus berupa string" });
+      }
+      const category = await prisma.category.findUnique({ where: { id: categoryId } });
+      if (!category) return res.status(404).json({ error: "Kategori tidak ditemukan" });
+    }
+    if (images !== undefined && validateProductImages(images) === null) {
+      return res.status(400).json({ error: "images harus berupa array URL HTTPS" });
+    }
+    if (isLimited !== undefined && typeof isLimited !== "boolean") {
+      return res.status(400).json({ error: "isLimited harus berupa boolean" });
+    }
+    if (shopeeUrl !== undefined && shopeeUrl !== null && !isHttpsUrl(shopeeUrl)) {
+      return res.status(400).json({ error: "shopeeUrl harus berupa URL HTTPS" });
+    }
+
     const updated = await prisma.$transaction(async (tx) => {
       // Update data produk dasar
       await tx.product.update({
@@ -374,9 +456,9 @@ export const updateProduct = async (req: Request, res: Response, next: NextFunct
           ...(categoryId && { categoryId }),
           ...(shortDescription !== undefined && { shortDescription }),
           ...(description && { description }),
-          ...(price && { price: parseInt(price) }),
+          ...(price !== undefined && { price: typeof price === "number" ? price : Number(price) }),
           ...(images && { images: Array.isArray(images) ? images : [] }),
-          ...(isLimited !== undefined && { isLimited: Boolean(isLimited) }),
+          ...(isLimited !== undefined && { isLimited }),
           ...(shopeeUrl !== undefined && { shopeeUrl }),
         },
       });
@@ -443,10 +525,13 @@ export const upsertStory = async (req: Request, res: Response, next: NextFunctio
     }
 
     const { id } = req.params;
-    const { title, content, coverImageUrl, processImages } = req.body;
+    const { title, content, process, coverImageUrl, processImages } = req.body;
 
     if (!title || !content) {
       return res.status(400).json({ error: "title dan content cerita wajib diisi" });
+    }
+    if (process !== undefined && process !== null && typeof process !== "string") {
+      return res.status(400).json({ error: "process harus berupa string atau null" });
     }
 
     const product = await prisma.product.findUnique({ where: { id } });
@@ -467,12 +552,14 @@ export const upsertStory = async (req: Request, res: Response, next: NextFunctio
         productId: id,
         title,
         content,
+        process: typeof process === "string" ? process : null,
         coverImageUrl,
         processImages: Array.isArray(processImages) ? processImages : [],
       },
       update: {
         title,
         content,
+        process: process === undefined ? undefined : process,
         coverImageUrl,
         processImages: Array.isArray(processImages) ? processImages : [],
       },

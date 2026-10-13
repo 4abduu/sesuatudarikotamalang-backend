@@ -36,6 +36,8 @@ import searchRoutes from "./routes/searchRoutes";
 import uploadRoutes from "./routes/uploadRoutes";
 import categoriesRoutes from "./routes/categoriesRoutes";
 import slotsRoutes from "./routes/slotsRoutes";
+import settingsRoutes from "./routes/settingsRoutes";
+import aiRoutes from "./routes/aiRoutes";
 
 const app = express();
 
@@ -94,6 +96,8 @@ app.use("/api/notifications", notificationsRoutes);
 app.use("/api/search", searchRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/slots", slotsRoutes);
+app.use("/api/settings", settingsRoutes);
+app.use("/api/ai", aiRoutes);
 
 // 404 handler
 app.use((_req: Request, res: Response) => {

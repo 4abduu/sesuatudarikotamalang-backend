@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from "express";
+import { uploadBuffer } from "../lib/cloudinary";
 
 // Controller untuk menangani upload file tunggal atau jamak
 export const uploadSingle = async (req: Request, res: Response, next: NextFunction) => {
@@ -7,16 +8,15 @@ export const uploadSingle = async (req: Request, res: Response, next: NextFuncti
       return res.status(400).json({ error: "Tidak ada file yang diunggah" });
     }
 
-    const baseUrl = process.env.PUBLIC_BASE_URL
-      ? process.env.PUBLIC_BASE_URL.replace(/\/$/, "")
-      : `${req.protocol}://${req.get("host")}`;
-
-    const fileUrl = `${baseUrl}/uploads/${req.file.filename}`;
+    const uploaded = await uploadBuffer(req.file.buffer, {
+      filename: req.file.originalname,
+      mimetype: req.file.mimetype,
+    });
 
     res.json({
       message: "Upload file berhasil",
-      url: fileUrl,
-      filename: req.file.filename,
+      url: uploaded.secure_url,
+      filename: uploaded.public_id,
       size: req.file.size,
       mimetype: req.file.mimetype,
     });
@@ -32,15 +32,17 @@ export const uploadMultiple = async (req: Request, res: Response, next: NextFunc
       return res.status(400).json({ error: "Tidak ada file yang diunggah" });
     }
 
-    const baseUrl = process.env.PUBLIC_BASE_URL
-      ? process.env.PUBLIC_BASE_URL.replace(/\/$/, "")
-      : `${req.protocol}://${req.get("host")}`;
-
-    const uploadedFiles = files.map((file) => ({
-      url: `${baseUrl}/uploads/${file.filename}`,
-      filename: file.filename,
-      size: file.size,
-      mimetype: file.mimetype,
+    const uploadedFiles = await Promise.all(files.map(async (file) => {
+      const uploaded = await uploadBuffer(file.buffer, {
+        filename: file.originalname,
+        mimetype: file.mimetype,
+      });
+      return {
+        url: uploaded.secure_url,
+        filename: uploaded.public_id,
+        size: file.size,
+        mimetype: file.mimetype,
+      };
     }));
 
     res.json({

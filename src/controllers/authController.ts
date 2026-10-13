@@ -271,9 +271,9 @@ export const changeEmailRequest = async (req: Request, res: Response, next: Next
       return res.status(401).json({ error: "Belum login" });
     }
 
-    const { newEmail, password } = req.body;
-    if (!newEmail || typeof newEmail !== "string" || !password || typeof password !== "string") {
-      return res.status(400).json({ error: "newEmail dan password wajib diisi" });
+    const { newEmail } = req.body;
+    if (!newEmail || typeof newEmail !== "string") {
+      return res.status(400).json({ error: "newEmail wajib diisi" });
     }
 
     const currentUser = await prisma.user.findUnique({ where: { id: req.user.id } });
@@ -281,14 +281,7 @@ export const changeEmailRequest = async (req: Request, res: Response, next: Next
       return res.status(404).json({ error: "User tidak ditemukan" });
     }
 
-    if (currentUser.passwordHash) {
-      const match = await bcrypt.compare(password, currentUser.passwordHash);
-      if (!match) {
-        return res.status(401).json({ error: "Password konfirmasi salah" });
-      }
-    }
-
-    if (newEmail === req.user.email) {
+    if (newEmail === currentUser.email) {
       return res.status(400).json({ error: "Email baru tidak boleh sama dengan email lama" });
     }
 
@@ -316,7 +309,7 @@ export const changeEmailRequest = async (req: Request, res: Response, next: Next
       },
     });
 
-    await sendOtpEmail(newEmail, code, "ganti_email");
+    await sendOtpEmail(currentUser.email, code, "ganti_email");
 
     res.json({ message: "Kode OTP telah dikirim ke email baru Anda" });
   } catch (err) {

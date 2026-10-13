@@ -62,9 +62,8 @@ async function runP3Tests() {
   console.log("\n[F-04] Uji PUBLIC_BASE_URL pada Upload Controller");
   const { uploadSingle } = require("../dist/controllers/uploadController");
 
-  process.env.PUBLIC_BASE_URL = "https://api.sesuatudarikotamalang.com";
   const mockReq = {
-    file: { filename: "file-12345.png", size: 1024, mimetype: "image/png" },
+    file: { originalname: "file-12345.png", buffer: Buffer.from("test"), size: 1024, mimetype: "image/png" },
     get: () => "localhost:4000",
     protocol: "http",
   };
@@ -76,12 +75,14 @@ async function runP3Tests() {
     },
   };
 
-  await uploadSingle(mockReq, mockRes, () => {});
+  let uploadError = null;
+  await uploadSingle(mockReq, mockRes, (error) => {
+    uploadError = error;
+  });
   testAssert(
-    mockRes.body.url === "https://api.sesuatudarikotamalang.com/uploads/file-12345.png",
-    `URL file upload menggunakan PUBLIC_BASE_URL jika diset. Actual: ${mockRes.body.url}`
+    uploadError && uploadError.status === 503,
+    "Upload tanpa konfigurasi Cloudinary ditolak dengan status 503"
   );
-  delete process.env.PUBLIC_BASE_URL;
 
   console.log("\n==================================================");
   console.log(`HASIL TES PAKET P3: ${passed}/${total} LULUS`);

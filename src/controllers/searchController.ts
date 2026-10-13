@@ -5,6 +5,9 @@ import { attachEffectiveStockToVariants } from "../lib/stock";
 // GET /api/search — Search produk dan kreator untuk mobile/customer (query: ?q=)
 export const search = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    if (req.query.q !== undefined && typeof req.query.q !== "string") {
+      return res.status(400).json({ error: "q harus berupa string" });
+    }
     const q = typeof req.query.q === "string" ? req.query.q.trim().toLowerCase() : "";
 
     if (!q) {

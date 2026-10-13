@@ -5,6 +5,9 @@ import prisma from "../lib/prisma";
 export const listReviews = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { productId } = req.query;
+    if (productId !== undefined && typeof productId !== "string") {
+      return res.status(400).json({ error: "productId harus berupa string" });
+    }
     const where: any = { status: "tampil" };
 
     if (typeof productId === "string") {

@@ -1,8 +1,10 @@
-// Gunakan database test terpisah
-process.env.DATABASE_URL =
-  process.env.TEST_DATABASE_URL ||
-  process.env.DATABASE_URL ||
-  "mysql://root:@localhost:3306/sesuatu_darikota_malang_test";
+// Tes ini WAJIB berjalan di database test (nama berakhiran _test); proses keluar bila bukan.
+require("./helpers/requireTestDb")();
+
+// Tes ini membuat banyak order pada slot dan tanggal yang sama. Kapasitas slot dinaikkan secara
+// eksplisit di sini agar tidak bertabrakan dengan aturan slot. Aturan slot diuji terpisah di
+// test_concurrency_orders.js dan test_paketa_features.js.
+process.env.SLOT_CAPACITY = "50";
 
 const crypto = require("crypto");
 const prisma = require("../dist/lib/prisma").default || require("../dist/lib/prisma");

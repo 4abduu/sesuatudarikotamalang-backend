@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from "express";
+import crypto from "crypto";
 import prisma from "../lib/prisma";
 import { effectiveStock } from "../lib/stock";
 import { snap } from "../lib/midtrans";
@@ -120,9 +121,21 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
     // Pengecekan dan pembuatan order dilakukan dalam SATU transaksi database (Atomic)
     // F-07 (batas order aktif) dan A8 (kapasitas slot) dipindahkan ke dalam transaksi
     // agar race condition antar request konkuren tidak bisa mem-bypass batas.
-    const newOrder = await prisma.$transaction(
-      async (tx) => {
+    try {
+      await prisma.appSettings.upsert({ where: { id: 1 }, create: { id: 1 }, update: {} });
+    } catch (error: any) {
+      // Another request may create the singleton concurrently.
+      if (error?.code !== "P2002") throw error;
+    }
+
+    let newOrder: any;
+    for (let transactionAttempt = 0; transactionAttempt < 3; transactionAttempt++) {
+      try {
+        newOrder = await prisma.$transaction(
+          async (tx) => {
       // Lock baris AppSettings untuk serialisasi pemeriksaan batas
+      // Pastikan baris pengaturan ada. Tanpa baris ini, FOR UPDATE tidak mengunci apa pun
+      // (ReadCommitted tidak memakai gap lock), sehingga batas slot/order bisa kebobolan.
       const settingsRows: any[] = await tx.$queryRaw`SELECT * FROM app_settings WHERE id = 1 FOR UPDATE`;
       const settings = settingsRows[0] ?? null;
       const autoCancel = settings?.autoCancelEnabled ?? true;
@@ -252,17 +265,11 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
         throw { status: 409, message: "Maaf, stok produk ini baru saja habis" };
       }
 
-      // 4. AppSettings sudah diambil di atas (settingsRows) via FOR UPDATE
-      // Jika belum ada, buat baris default
-      if (!settings) {
-        await tx.appSettings.create({ data: { id: 1 } });
-      }
-
-      // 5. Generate Order Number Unik (SDK-XXXX) dengan retry loop untuk mencegah collision
+      // 4. Generate Order Number Unik (SDK-XXXX) dengan retry loop untuk mencegah collision
       let orderNumber = "";
       let attempts = 0;
       while (attempts < 10) {
-        const candidate = `SDK-${Math.floor(1000 + Math.random() * 9000)}`;
+        const candidate = `SDK-${crypto.randomInt(1000, 10000)}`;
         const existingOrder = await tx.order.findUnique({ where: { orderNumber: candidate } });
         if (!existingOrder) {
           orderNumber = candidate;
@@ -314,8 +321,14 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
         },
       });
 
-      return createdOrder;
-    }, { isolationLevel: "ReadCommitted" });
+            return createdOrder;
+          }, { isolationLevel: "ReadCommitted" });
+        break;
+      } catch (error: any) {
+        const isDeadlock = error?.code === "P2010";
+        if (!isDeadlock || transactionAttempt === 2) throw error;
+      }
+    }
 
     // Jika paymentMethod === "midtrans", buat Snap Transaction Token
     let snapResponse: any = null;
@@ -439,6 +452,15 @@ export const repayOrder = async (req: Request, res: Response, next: NextFunction
       return res.status(400).json({ error: "Waktu pembayaran pesanan ini telah kedaluwarsa" });
     }
 
+    // Idempotency guard: a payment record means Snap was already created for this order.
+    const existingPayment = await prisma.payment.findUnique({ where: { orderId: order.id } });
+    if (existingPayment) {
+      return res.status(409).json({
+        error: "Pembayaran untuk pesanan ini sudah dibuat. Selesaikan lewat instruksi pembayaran sebelumnya atau tunggu hingga kedaluwarsa.",
+        code: "PAYMENT_ALREADY_CREATED",
+      });
+    }
+
     // Hitung sisa menit hold untuk expiry Midtrans
     const remainingMs = order.holdExpiresAt
       ? new Date(order.holdExpiresAt).getTime() - Date.now()
@@ -484,13 +506,7 @@ export const repayOrder = async (req: Request, res: Response, next: NextFunction
     }
 
     // Simpan atau update record payment
-    const existingPayment = await prisma.payment.findFirst({ where: { orderId: order.id } });
-    if (existingPayment) {
-      await prisma.payment.update({
-        where: { id: existingPayment.id },
-        data: { midtransTransactionId: transaction.token },
-      });
-    } else {
+    try {
       await prisma.payment.create({
         data: {
           orderId: order.id,
@@ -498,6 +514,15 @@ export const repayOrder = async (req: Request, res: Response, next: NextFunction
           status: "pending",
         },
       });
+    } catch (paymentError: any) {
+      // Two requests can pass the pre-check before either one persists payment.
+      if (paymentError?.code === "P2002") {
+        return res.status(409).json({
+          error: "Pembayaran untuk pesanan ini sudah dibuat. Selesaikan lewat instruksi pembayaran sebelumnya atau tunggu hingga kedaluwarsa.",
+          code: "PAYMENT_ALREADY_CREATED",
+        });
+      }
+      throw paymentError;
     }
 
     res.json({
@@ -518,4 +543,3 @@ export default {
   cancelOrder,
   repayOrder,
 };
-

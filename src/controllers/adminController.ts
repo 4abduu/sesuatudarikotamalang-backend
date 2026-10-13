@@ -160,6 +160,12 @@ export const listApplications = async (req: Request, res: Response, next: NextFu
   try {
     const { status } = req.query;
     const where: any = {};
+    if (status !== undefined && typeof status !== "string") {
+      return res.status(400).json({ error: "status harus berupa string" });
+    }
+    if (typeof status === "string" && !["pending", "diterima", "ditolak"].includes(status)) {
+      return res.status(400).json({ error: "status pengajuan tidak valid" });
+    }
     if (typeof status === "string") {
       where.status = status;
     }
@@ -304,8 +310,17 @@ export const listOrders = async (req: Request, res: Response, next: NextFunction
   try {
     const { status, search, pickupDate, paymentMethod, page, limit } = req.query;
 
-    const parsedPage = typeof page === "string" && !isNaN(parseInt(page)) && parseInt(page) > 0 ? parseInt(page) : undefined;
-    const parsedLimit = typeof limit === "string" && !isNaN(parseInt(limit)) && parseInt(limit) > 0 ? parseInt(limit) : undefined;
+    for (const [name, value] of Object.entries({ status, search, pickupDate, paymentMethod, page, limit })) {
+      if (value !== undefined && typeof value !== "string") {
+        return res.status(400).json({ error: `${name} harus berupa string` });
+      }
+    }
+
+    const parsedPage = typeof page === "string" && /^\d+$/.test(page) && parseInt(page, 10) > 0 ? parseInt(page, 10) : undefined;
+    const parsedLimit = typeof limit === "string" && /^\d+$/.test(limit) && parseInt(limit, 10) > 0 ? parseInt(limit, 10) : undefined;
+    if ((page !== undefined && parsedPage === undefined) || (limit !== undefined && parsedLimit === undefined)) {
+      return res.status(400).json({ error: "page dan limit harus berupa bilangan bulat positif" });
+    }
 
     const where: any = {};
 
@@ -396,9 +411,17 @@ export const updateOrderStatus = async (req: Request, res: Response, next: NextF
 
     const oldStatus = order.status;
 
-    // F-17: Batasi transisi status yang tidak valid
-    if (["dibatalkan", "kedaluwarsa"].includes(oldStatus) && status === "lunas") {
-      return res.status(400).json({ error: `Pesanan yang sudah ${oldStatus} tidak dapat langsung diubah menjadi lunas` });
+    // F-17: Batasi transisi status yang tidak valid dan mencegah order terminal dihidupkan kembali.
+    const allowedTransitions: Record<string, string[]> = {
+      menunggu_bayar: ["lunas", "dibatalkan", "kedaluwarsa"],
+      lunas: ["selesai", "dibatalkan", "lewat_batas_pengambilan"],
+      lewat_batas_pengambilan: ["selesai"],
+      selesai: [],
+      dibatalkan: [],
+      kedaluwarsa: [],
+    };
+    if (oldStatus !== status && !allowedTransitions[oldStatus]?.includes(status)) {
+      return res.status(400).json({ error: `Transisi status ${oldStatus} ke ${status} tidak diizinkan` });
     }
 
     const updatedOrder = await prisma.$transaction(async (tx) => {
@@ -788,6 +811,12 @@ export const listAdminArtisans = async (req: Request, res: Response, next: NextF
 export const listAdminProducts = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { q, categoryId } = req.query;
+    if (q !== undefined && typeof q !== "string") {
+      return res.status(400).json({ error: "q harus berupa string" });
+    }
+    if (categoryId !== undefined && typeof categoryId !== "string") {
+      return res.status(400).json({ error: "categoryId harus berupa string" });
+    }
     const where: any = {};
 
     if (typeof categoryId === "string" && categoryId.trim()) {
@@ -856,10 +885,26 @@ export const listAdminReviews = async (req: Request, res: Response, next: NextFu
     const { rating, status, q } = req.query;
     const where: any = {};
 
-    if (typeof rating === "string" && !isNaN(Number(rating))) {
+    if (rating !== undefined && typeof rating !== "string") {
+      return res.status(400).json({ error: "rating harus berupa string" });
+    }
+    if (status !== undefined && typeof status !== "string") {
+      return res.status(400).json({ error: "status harus berupa string" });
+    }
+    if (q !== undefined && typeof q !== "string") {
+      return res.status(400).json({ error: "q harus berupa string" });
+    }
+
+    if (typeof rating === "string") {
+      if (!/^[1-5]$/.test(rating)) {
+        return res.status(400).json({ error: "rating harus berupa angka 1 sampai 5" });
+      }
       where.rating = Number(rating);
     }
 
+    if (typeof status === "string" && !["tampil", "disembunyikan"].includes(status)) {
+      return res.status(400).json({ error: "status ulasan tidak valid" });
+    }
     if (status === "tampil" || status === "disembunyikan") {
       where.status = status;
     }

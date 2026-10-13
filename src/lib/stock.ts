@@ -70,13 +70,50 @@ export async function attachEffectiveStockToVariants<T extends { id: string }>(
   variants: T[]
 ): Promise<(T & { effectiveStock: number })[]> {
   if (!variants || variants.length === 0) return [];
-  return Promise.all(
-    variants.map(async (v) => {
-      const effStock = await effectiveStock(v.id);
-      return {
-        ...v,
-        effectiveStock: effStock,
-      };
-    })
+
+  const variantIds = variants.map((variant) => variant.id);
+  const [storedVariants, settings] = await Promise.all([
+    prisma.productVariant.findMany({
+      where: { id: { in: variantIds } },
+      select: { id: true, stock: true },
+    }),
+    prisma.appSettings.findUnique({ where: { id: 1 } }),
+  ]);
+
+  const now = new Date();
+  const autoCancelEnabled = settings?.autoCancelEnabled ?? true;
+  const activeOrderConditions: any[] = [
+    { status: "lunas" },
+    { status: "selesai" },
+    { status: "lewat_batas_pengambilan" },
+    {
+      status: "menunggu_bayar",
+      paymentMethod: "midtrans",
+      holdExpiresAt: { gt: now },
+    },
+  ];
+  activeOrderConditions.push(autoCancelEnabled
+    ? { status: "menunggu_bayar", paymentMethod: "cod", holdExpiresAt: { gt: now } }
+    : { status: "menunggu_bayar", paymentMethod: "cod" });
+
+  const reservedByVariant = await prisma.orderItem.groupBy({
+    by: ["variantId"],
+    where: {
+      variantId: { in: variantIds },
+      order: { OR: activeOrderConditions },
+    },
+    _sum: { quantity: true },
+  });
+
+  const stockMap = new Map(storedVariants.map((variant) => [variant.id, variant.stock]));
+  const reservedMap = new Map(
+    reservedByVariant
+      .filter((row) => row.variantId !== null)
+      .map((row) => [row.variantId as string, row._sum.quantity ?? 0])
   );
+
+  return variants.map((variant) => ({
+    ...variant,
+    effectiveStock: Math.max(0, (stockMap.get(variant.id) ?? 0) - (reservedMap.get(variant.id) ?? 0)),
+  }));
 }
