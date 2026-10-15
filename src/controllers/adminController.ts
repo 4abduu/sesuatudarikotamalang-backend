@@ -23,6 +23,7 @@ export const getDashboard = async (req: Request, res: Response, next: NextFuncti
       readyForPickup,
       pendingApplications,
       lowStockCount,
+      lowStockVariants,
       statusDistribution,
       topSellingRaw,
       recentPaidOrders,
@@ -44,6 +45,20 @@ export const getDashboard = async (req: Request, res: Response, next: NextFuncti
         where: {
           stock: { lt: 6 },
           product: { isActive: true },
+        },
+      }),
+      // 4b. Daftar varian stok menipis (maks 10, terendah dulu) untuk kartu "Perlu Restock"
+      prisma.productVariant.findMany({
+        where: {
+          stock: { lt: 6 },
+          product: { isActive: true },
+        },
+        orderBy: { stock: "asc" },
+        take: 10,
+        select: {
+          stock: true,
+          combination: true,
+          product: { select: { id: true, name: true } },
         },
       }),
       // 5. Distribusi status pesanan
@@ -138,11 +153,22 @@ export const getDashboard = async (req: Request, res: Response, next: NextFuncti
       booked: slotCountMap[time] || 0,
     }));
 
+    // Reshape lowStockVariants ke { id, name, variantLabel, stock }
+    const lowStockProducts = lowStockVariants.map((v) => ({
+      id: v.product.id,
+      name: v.product.name,
+      variantLabel: Array.isArray(v.combination) && v.combination.length > 0
+        ? (v.combination as string[]).join(" / ")
+        : "",
+      stock: v.stock,
+    }));
+
     res.json({
       ordersToday,
       readyForPickup,
       pendingApplications,
       lowStockCount,
+      lowStockProducts,
       revenue7Days,
       revenueByDay,
       statusDistribution: statusDistribution.map((s) => ({ status: s.status, count: s._count._all })),
