@@ -18,17 +18,31 @@ const dbName = require("./helpers/requireTestDb")();
 console.log(`Database tes: ${dbName}\n`);
 
 const suites = [
+  // Paket keamanan & integritas
   "test_p1_security.js",
   "test_p2_integrity.js",
   "test_p3_hardening.js",
   "test_routes_mounted.js",
+  // Fase fitur
   "test_fase13.js",
   "test_paketa_features.js",
   "test_concurrency_orders.js",
   "test_todo3_features.js",
   "test_payment_idempotency.js",
-  "test_auth_revocation.js",
+  // Auth & token
+  "test_auth_revocation.js",       // diperbarui Langkah 5: passwordChangedAt
+  // Upload & file
+  "test_file_signature.js",        // Langkah 0: magic bytes
+  // AI
   "test_ai_story_draft.js",
+  "test_ai_story_draft_v2.js",     // versi lengkap dengan alias & retry
+  // Fitur baru Langkah 1–4
+  "test_profile_cloudinary.js",    // Langkah 1: avatar Cloudinary
+  "test_change_email_flow.js",     // Langkah 2: alur ganti email
+  "test_tx_retry.js",              // Langkah 3: retry deadlock
+  "test_admin_status_transitions.js", // Langkah 4: transisi status admin
+  // TIDAK dimasukkan: test_ai_integration.js (butuh server live + Gemini sungguhan)
+  // TIDAK dimasukkan: test-cloudinary.js (butuh jaringan + kredensial Cloudinary)
 ];
 
 const rows = [];

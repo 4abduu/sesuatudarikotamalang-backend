@@ -4,6 +4,7 @@ import prisma from "../lib/prisma";
 import { effectiveStock } from "../lib/stock";
 import { snap } from "../lib/midtrans";
 import { getPickupSlots, getSlotCapacity } from "../lib/slots";
+import { isRetryableTransactionError } from "../lib/txRetry";
 
 // GET /api/orders — Riwayat pesanan milik user yang sedang login
 export const listOrders = async (req: Request, res: Response, next: NextFunction) => {
@@ -325,7 +326,7 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
           }, { isolationLevel: "ReadCommitted" });
         break;
       } catch (error: any) {
-        const isDeadlock = error?.code === "P2010";
+        const isDeadlock = isRetryableTransactionError(error);
         if (!isDeadlock || transactionAttempt === 2) throw error;
       }
     }

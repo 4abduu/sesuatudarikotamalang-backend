@@ -6,8 +6,14 @@ import { OAuth2Client } from "google-auth-library";
 import prisma from "../lib/prisma";
 import { validatePassword } from "../lib/validatePassword";
 import { sendOtpEmail } from "../lib/mailer";
+import { isOwnCloudinaryImageUrl } from "../lib/cloudinary";
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
+/** Terbitkan JWT dengan payload dan masa berlaku sama persis seperti login. */
+function issueToken(userId: string, role: string): string {
+  return jwt.sign({ id: userId, role }, process.env.JWT_SECRET || "", { expiresIn: "7d" });
+}
 
 // POST /api/auth/register
 export const register = async (req: Request, res: Response, next: NextFunction) => {
@@ -141,9 +147,10 @@ export const googleLogin = async (req: Request, res: Response, next: NextFunctio
     } else if (user.authProvider === "email") {
       // F-09: Jika sebelumnya daftar via email biasa dan login via Google, set passwordHash = null
       // agar penyerang yang sempat mendaftarkan email korban tidak bisa mengakses akun setelah korban login Google.
+      // passwordChangedAt diisi agar token lama (sebelum link Google) dicabut.
       user = await prisma.user.update({
         where: { id: user.id },
-        data: { authProvider: "both", passwordHash: null },
+        data: { authProvider: "both", passwordHash: null, passwordChangedAt: new Date() },
       });
     }
 
@@ -245,10 +252,12 @@ export const forgotPasswordVerify = async (req: Request, res: Response, next: Ne
     }
 
     const passwordHash = await bcrypt.hash(newPassword, 10);
+    // passwordChangedAt diisi agar semua token lama dicabut
     await prisma.user.update({
       where: { id: user.id },
       data: {
         passwordHash,
+        passwordChangedAt: new Date(),
         authProvider: user.authProvider === "google" ? "both" : user.authProvider,
       },
     });
@@ -258,6 +267,7 @@ export const forgotPasswordVerify = async (req: Request, res: Response, next: Ne
       data: { isUsed: true },
     });
 
+    // forgotPasswordVerify tidak mengembalikan token — user harus login ulang (D1)
     res.json({ message: "Password berhasil diperbarui. Silakan login kembali." });
   } catch (err) {
     next(err);
@@ -271,9 +281,15 @@ export const changeEmailRequest = async (req: Request, res: Response, next: Next
       return res.status(401).json({ error: "Belum login" });
     }
 
-    const { newEmail } = req.body;
-    if (!newEmail || typeof newEmail !== "string") {
-      return res.status(400).json({ error: "newEmail wajib diisi" });
+    const rawEmail = req.body.newEmail;
+    if (!rawEmail || typeof rawEmail !== "string") {
+      return res.status(400).json({ error: "Format email baru tidak valid" });
+    }
+    const newEmail = rawEmail.trim();
+
+    // Validasi format email sederhana
+    if (newEmail.length > 191 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) {
+      return res.status(400).json({ error: "Format email baru tidak valid" });
     }
 
     const currentUser = await prisma.user.findUnique({ where: { id: req.user.id } });
@@ -281,7 +297,8 @@ export const changeEmailRequest = async (req: Request, res: Response, next: Next
       return res.status(404).json({ error: "User tidak ditemukan" });
     }
 
-    if (newEmail === currentUser.email) {
+    // Perbandingan tidak peka huruf besar-kecil
+    if (newEmail.toLowerCase() === currentUser.email.toLowerCase()) {
       return res.status(400).json({ error: "Email baru tidak boleh sama dengan email lama" });
     }
 
@@ -309,9 +326,10 @@ export const changeEmailRequest = async (req: Request, res: Response, next: Next
       },
     });
 
-    await sendOtpEmail(currentUser.email, code, "ganti_email");
+    // OTP dikirim ke email LAMA; newEmail disebutkan di isi email
+    await sendOtpEmail(currentUser.email, code, "ganti_email", { newEmail });
 
-    res.json({ message: "Kode OTP telah dikirim ke email baru Anda" });
+    res.json({ message: "Kode OTP telah dikirim ke email Anda saat ini" });
   } catch (err) {
     next(err);
   }
@@ -353,19 +371,31 @@ export const changeEmailVerify = async (req: Request, res: Response, next: NextF
       return res.status(409).json({ error: "Email baru sudah digunakan oleh akun lain" });
     }
 
-    await prisma.user.update({
-      where: { id: req.user.id },
-      data: { email: otpRecord.targetEmail },
-    });
+    try {
+      // passwordChangedAt diisi agar token lama dicabut; ditulis sebelum token baru diterbitkan
+      await prisma.user.update({
+        where: { id: req.user.id },
+        data: { email: otpRecord.targetEmail, passwordChangedAt: new Date() },
+      });
+    } catch (updateErr: any) {
+      // P2002: unique constraint — race condition, email baru diambil akun lain tepat bersamaan
+      if (updateErr?.code === "P2002") {
+        return res.status(409).json({ error: "Email baru sudah digunakan oleh akun lain" });
+      }
+      throw updateErr;
+    }
 
     await prisma.otpCode.update({
       where: { id: otpRecord.id },
       data: { isUsed: true },
     });
 
+    // D1: kembalikan token baru agar sesi yang sedang berjalan tidak terputus
+    const newToken = issueToken(req.user.id, req.user.role);
     res.json({
       message: "Email berhasil diperbarui",
       email: otpRecord.targetEmail,
+      token: newToken,
     });
   } catch (err) {
     next(err);
@@ -409,12 +439,15 @@ export const changePassword = async (req: Request, res: Response, next: NextFunc
     }
 
     const passwordHash = await bcrypt.hash(newPassword, 10);
+    // passwordChangedAt ditulis sebelum token baru diterbitkan agar iat >= detik passwordChangedAt
     await prisma.user.update({
       where: { id: user.id },
-      data: { passwordHash },
+      data: { passwordHash, passwordChangedAt: new Date() },
     });
 
-    res.json({ message: "Password berhasil diperbarui" });
+    // D1: kembalikan token baru agar sesi yang sedang berjalan tidak terputus
+    const newToken = issueToken(user.id, user.role);
+    res.json({ message: "Password berhasil diperbarui", token: newToken });
   } catch (err) {
     next(err);
   }
@@ -489,8 +522,8 @@ export const updateProfile = async (req: Request, res: Response, next: NextFunct
           trimmedAvatar.startsWith(`${reqBase}/uploads/`) ||
           trimmedAvatar.startsWith("/uploads/");
 
-        if (!isValidLocal) {
-          return res.status(400).json({ error: "avatarUrl harus merupakan URL upload server lokal" });
+        if (!isValidLocal && !isOwnCloudinaryImageUrl(trimmedAvatar)) {
+          return res.status(400).json({ error: "avatarUrl harus merupakan URL hasil upload" });
         }
 
         updateData.avatarUrl = trimmedAvatar;

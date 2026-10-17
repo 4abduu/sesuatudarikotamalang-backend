@@ -85,6 +85,10 @@ model User {
   role         Role     @default(buyer)
   authProvider String   @default("email") // "email", "google", atau "both"
   avatarUrl    String?
+  // Diisi setiap kali kredensial berubah (ganti/reset password, ganti email, link Google).
+  // Dipakai middleware untuk mencabut token lama yang diterbitkan sebelum perubahan ini.
+  // Null berarti belum pernah ada perubahan kredensial sejak akun dibuat (token tetap valid).
+  passwordChangedAt DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

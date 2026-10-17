@@ -59,3 +59,18 @@ Dokumentasi arsitektur dan aturan bisnis lengkap dapat dirujuk pada folder `docs
 ```bash
 npm run prisma:studio
 ```
+
+## Konfigurasi Environment
+
+Salin `.env.example` ke `.env` dan isi variabel berikut. Nilai sesungguhnya dibagikan lewat jalur pribadi (bukan di repo).
+
+| Variabel | Wajib | Dampak bila kosong |
+|---|---|---|
+| `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` | Untuk fitur upload | `POST /api/upload/*` membalas **503** |
+| `GEMINI_API_KEY`, `GEMINI_MODEL` | Untuk fitur AI | `POST /api/ai/story-draft` membalas **503** |
+| `RESEND_API_KEY` | Untuk OTP email | OTP hanya dicetak di log server (mode simulasi) |
+| `JWT_SECRET` | Wajib | Auth tidak berjalan |
+| `DATABASE_URL` | Wajib | Server tidak bisa terhubung ke database |
+| `MIDTRANS_SERVER_KEY`, dll. | Untuk pembayaran | Pembuatan order Midtrans gagal |
+
+> **Catatan:** variabel `GEMINI_API_KEY` dan `GEMINI_MODEL` harus diisi (tidak boleh hanya spasi) agar fitur AI aktif — nilai kosong `""` disamakan dengan tidak terkonfigurasi.

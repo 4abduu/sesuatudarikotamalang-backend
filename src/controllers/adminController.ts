@@ -441,7 +441,7 @@ export const updateOrderStatus = async (req: Request, res: Response, next: NextF
     const allowedTransitions: Record<string, string[]> = {
       menunggu_bayar: ["lunas", "dibatalkan", "kedaluwarsa"],
       lunas: ["selesai", "dibatalkan", "lewat_batas_pengambilan"],
-      lewat_batas_pengambilan: ["selesai"],
+      lewat_batas_pengambilan: ["selesai", "dibatalkan"],
       selesai: [],
       dibatalkan: [],
       kedaluwarsa: [],

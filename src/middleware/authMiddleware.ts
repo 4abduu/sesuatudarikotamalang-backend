@@ -32,20 +32,25 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     // Ambil data user & role terbaru langsung dari DB untuk mencegah klaim JWT basi
     const dbUser = await prisma.user.findUnique({
       where: { id: payload.id },
-      select: { id: true, name: true, email: true, role: true, avatarUrl: true, updatedAt: true },
+      select: { id: true, name: true, email: true, role: true, avatarUrl: true, passwordChangedAt: true },
     });
 
     if (!dbUser) {
       return res.status(401).json({ error: "User sudah tidak terdaftar di sistem" });
     }
 
-    // F-26: perubahan akun mencabut token yang diterbitkan sebelumnya.
+    // F-26: pencabutan token hanya bila kredensial berubah (ganti/reset password, ganti email, link Google).
     // Perbandingan memakai detik karena JWT iat tidak menyimpan milidetik.
-    if (payload.iat && Math.floor(dbUser.updatedAt.getTime() / 1000) > payload.iat) {
+    // null berarti belum pernah ada perubahan kredensial → token tetap valid.
+    if (
+      payload.iat &&
+      dbUser.passwordChangedAt &&
+      Math.floor(dbUser.passwordChangedAt.getTime() / 1000) > payload.iat
+    ) {
       return res.status(401).json({ error: "Sesi kedaluwarsa setelah perubahan akun" });
     }
 
-    const { updatedAt: _updatedAt, ...user } = dbUser;
+    const { passwordChangedAt: _pca, ...user } = dbUser;
     req.user = user;
     next();
   } catch (dbErr) {

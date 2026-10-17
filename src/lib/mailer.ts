@@ -78,13 +78,17 @@ export interface CopyVariant {
   desc: string;
 }
 
-function copyFor(purpose: OtpPurpose): CopyVariant {
+function copyFor(purpose: OtpPurpose, options?: { newEmail?: string }): CopyVariant {
   if (purpose === "ganti_email") {
+    const newEmailSafe = options?.newEmail ? escapeHtml(options.newEmail) : null;
+    const desc = newEmailSafe
+      ? `Ada permintaan mengganti email akunmu di Sesuatu DariKota Malang menjadi <strong>${newEmailSafe}</strong>. Gunakan kode OTP berikut untuk menyetujui perubahan ini. Jika bukan kamu yang meminta, abaikan email ini dan segera ganti password akunmu:`
+      : `Ada permintaan mengganti email akunmu di Sesuatu DariKota Malang. Gunakan kode OTP berikut untuk menyetujui perubahan ini. Jika bukan kamu yang meminta, abaikan email ini dan segera ganti password akunmu:`;
     return {
       subject: `Kode Verifikasi Ganti Email — ${BRAND_NAME}`,
-      eyebrow: "Verifikasi Email Baru",
-      title: "Konfirmasi Email Baru Kamu",
-      desc: "Gunakan kode OTP berikut untuk memverifikasi perubahan alamat email akunmu di Sesuatu DariKota Malang:",
+      eyebrow: "Verifikasi Ganti Email",
+      title: "Konfirmasi Penggantian Email",
+      desc,
     };
   }
   return {
@@ -99,8 +103,8 @@ function copyFor(purpose: OtpPurpose): CopyVariant {
 /* Build branded OTP HTML                                              */
 /* ------------------------------------------------------------------ */
 
-function buildOtpHtml(code: string, purpose: OtpPurpose): string {
-  const copy = copyFor(purpose);
+function buildOtpHtml(code: string, purpose: OtpPurpose, options?: { newEmail?: string }): string {
+  const copy = copyFor(purpose, options);
 
   return `
 <!DOCTYPE html>
@@ -171,7 +175,7 @@ function buildOtpHtml(code: string, purpose: OtpPurpose): string {
               </h2>
               <p style="margin:0 0 0;color:${BRAND.mutedForeground};
                        font-size:14px;line-height:1.55;">
-                ${escapeHtml(copy.desc)}
+                ${copy.desc}
               </p>
             </td>
           </tr>
@@ -254,8 +258,14 @@ function buildOtpHtml(code: string, purpose: OtpPurpose): string {
 
 /**
  * Mengirimkan email OTP (Reset Password atau Ganti Email) via Resend API
+ * @param options.newEmail — alamat baru yang akan disebutkan di email ganti_email
  */
-export async function sendOtpEmail(to: string, code: string, purpose: OtpPurpose): Promise<{ id: string } | unknown> {
+export async function sendOtpEmail(
+  to: string,
+  code: string,
+  purpose: OtpPurpose,
+  options?: { newEmail?: string },
+): Promise<{ id: string } | unknown> {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
     console.warn("[WARN] RESEND_API_KEY belum diisi di .env. Email OTP tidak benar-benar dikirim.");
@@ -264,8 +274,8 @@ export async function sendOtpEmail(to: string, code: string, purpose: OtpPurpose
   }
 
   const resend = new Resend(apiKey);
-  const copy = copyFor(purpose);
-  const htmlContent = buildOtpHtml(code, purpose);
+  const copy = copyFor(purpose, options);
+  const htmlContent = buildOtpHtml(code, purpose, options);
 
   const fromEmail = process.env.RESEND_FROM_EMAIL || "Sesuatu DariKota Malang <onboarding@resend.dev>";
 
