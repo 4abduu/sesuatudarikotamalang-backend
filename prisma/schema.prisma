@@ -116,10 +116,21 @@ model OtpCode {
   targetEmail String? // dipakai khusus untuk purpose = ganti_email
   expiresAt   DateTime
   isUsed      Boolean    @default(false)
+  attempts    Int        @default(0)
   createdAt   DateTime   @default(now())
 
   @@index([userId, purpose])
   @@map("otp_codes")
+}
+
+model RevokedToken {
+  tokenHash String   @id @db.Char(64)
+  userId    String
+  expiresAt DateTime
+  revokedAt DateTime @default(now())
+
+  @@index([expiresAt])
+  @@map("revoked_tokens")
 }
 
 // ----------------------------------------------------------------------------

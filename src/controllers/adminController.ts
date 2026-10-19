@@ -286,6 +286,10 @@ export const rejectApplication = async (req: Request, res: Response, next: NextF
     const { id } = req.params;
     const { reason } = req.body;
 
+    if (reason !== undefined && (typeof reason !== "string" || reason.length > 500)) {
+      return res.status(400).json({ error: "reason harus berupa string maksimal 500 karakter" });
+    }
+
     const application = await prisma.artisanApplication.findUnique({ where: { id } });
     if (!application) {
       return res.status(404).json({ error: "Pengajuan tidak ditemukan" });
@@ -343,14 +347,19 @@ export const listOrders = async (req: Request, res: Response, next: NextFunction
     }
 
     const parsedPage = typeof page === "string" && /^\d+$/.test(page) && parseInt(page, 10) > 0 ? parseInt(page, 10) : undefined;
-    const parsedLimit = typeof limit === "string" && /^\d+$/.test(limit) && parseInt(limit, 10) > 0 ? parseInt(limit, 10) : undefined;
+    const rawLimit = typeof limit === "string" && /^\d+$/.test(limit) && parseInt(limit, 10) > 0 ? parseInt(limit, 10) : undefined;
+    const parsedLimit = rawLimit === undefined ? undefined : Math.min(rawLimit, 100);
     if ((page !== undefined && parsedPage === undefined) || (limit !== undefined && parsedLimit === undefined)) {
       return res.status(400).json({ error: "page dan limit harus berupa bilangan bulat positif" });
     }
 
     const where: any = {};
 
+    const allowedOrderStatuses = ["menunggu_bayar", "lunas", "selesai", "dibatalkan", "kedaluwarsa", "lewat_batas_pengambilan"];
     if (typeof status === "string" && status.trim()) {
+      if (!allowedOrderStatuses.includes(status.trim())) {
+        return res.status(400).json({ error: "status order tidak valid" });
+      }
       where.status = status.trim();
     }
 
@@ -427,30 +436,37 @@ export const updateOrderStatus = async (req: Request, res: Response, next: NextF
       return res.status(400).json({ error: "Status tidak valid" });
     }
 
-    const order = await prisma.order.findUnique({
-      where: { id },
-      include: { items: true },
-    });
-    if (!order) {
-      return res.status(404).json({ error: "Pesanan tidak ditemukan" });
-    }
-
-    const oldStatus = order.status;
-
-    // F-17: Batasi transisi status yang tidak valid dan mencegah order terminal dihidupkan kembali.
-    const allowedTransitions: Record<string, string[]> = {
-      menunggu_bayar: ["lunas", "dibatalkan", "kedaluwarsa"],
-      lunas: ["selesai", "dibatalkan", "lewat_batas_pengambilan"],
-      lewat_batas_pengambilan: ["selesai", "dibatalkan"],
-      selesai: [],
-      dibatalkan: [],
-      kedaluwarsa: [],
-    };
-    if (oldStatus !== status && !allowedTransitions[oldStatus]?.includes(status)) {
-      return res.status(400).json({ error: `Transisi status ${oldStatus} ke ${status} tidak diizinkan` });
-    }
-
     const updatedOrder = await prisma.$transaction(async (tx) => {
+      // Kunci baris sebelum membaca status agar dua admin yang bersamaan
+      // tidak sama-sama memproses status lama dan menaikkan soldCount dua kali.
+      const lockedRows: Array<{ id: string }> = await tx.$queryRaw`SELECT id FROM orders WHERE id = ${id} FOR UPDATE`;
+      if (lockedRows.length === 0) {
+        throw { status: 404, message: "Pesanan tidak ditemukan" };
+      }
+
+      const order = await tx.order.findUnique({
+        where: { id },
+        include: { items: true },
+      });
+      if (!order) {
+        throw { status: 404, message: "Pesanan tidak ditemukan" };
+      }
+
+      const oldStatus = order.status;
+
+      // F-17: Batasi transisi status yang tidak valid dan mencegah order terminal dihidupkan kembali.
+      const allowedTransitions: Record<string, string[]> = {
+        menunggu_bayar: ["lunas", "dibatalkan", "kedaluwarsa"],
+        lunas: ["selesai", "dibatalkan", "lewat_batas_pengambilan"],
+        lewat_batas_pengambilan: ["selesai", "dibatalkan"],
+        selesai: [],
+        dibatalkan: [],
+        kedaluwarsa: [],
+      };
+      if (oldStatus !== status && !allowedTransitions[oldStatus]?.includes(status)) {
+        throw { status: 400, message: `Transisi status ${oldStatus} ke ${status} tidak diizinkan` };
+      }
+
       // 1. Jika pindah ke 'lunas' dan pickupDeadline belum ada, hitung pickupDeadline
       let pickupDeadline = order.pickupDeadline;
       if (status === "lunas" && !pickupDeadline) {
@@ -495,7 +511,10 @@ export const updateOrderStatus = async (req: Request, res: Response, next: NextF
     });
 
     res.json({ message: "Status pesanan berhasil diperbarui", order: updatedOrder });
-  } catch (err) {
+  } catch (err: any) {
+    if (err?.status) {
+      return res.status(err.status).json({ error: err.message });
+    }
     next(err);
   }
 };
@@ -506,8 +525,8 @@ export const extendOrderHold = async (req: Request, res: Response, next: NextFun
     const { id } = req.params;
     const { additionalMinutes } = req.body;
 
-    if (!additionalMinutes || typeof additionalMinutes !== "number" || additionalMinutes <= 0) {
-      return res.status(400).json({ error: "additionalMinutes harus berupa angka positif" });
+    if (!Number.isInteger(additionalMinutes) || additionalMinutes < 1 || additionalMinutes > 2880) {
+      return res.status(400).json({ error: "additionalMinutes harus berupa bilangan bulat antara 1 dan 2880" });
     }
 
     const order = await prisma.order.findUnique({ where: { id } });
@@ -682,6 +701,10 @@ export const updateSettings = async (req: Request, res: Response, next: NextFunc
       if (typeof whatsappAdminNumber !== "string" || !/^\+?\d+$/.test(whatsappAdminNumber)) {
         return res.status(400).json({ error: "whatsappAdminNumber hanya boleh berisi digit (boleh diawali +)" });
       }
+    }
+    if (notificationEmail !== undefined && notificationEmail !== null &&
+      (typeof notificationEmail !== "string" || notificationEmail.length > 191 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(notificationEmail))) {
+      return res.status(400).json({ error: "notificationEmail harus berupa email valid maksimal 191 karakter atau null" });
     }
 
     const settings = await prisma.appSettings.upsert({
@@ -908,7 +931,7 @@ export const toggleProductActive = async (req: Request, res: Response, next: Nex
 // GET /api/admin/reviews — A5: Daftar ulasan untuk admin (dengan filter rating, status, q, dan summary)
 export const listAdminReviews = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { rating, status, q } = req.query;
+    const { rating, status, q, page, limit } = req.query;
     const where: any = {};
 
     if (rating !== undefined && typeof rating !== "string") {
@@ -920,6 +943,18 @@ export const listAdminReviews = async (req: Request, res: Response, next: NextFu
     if (q !== undefined && typeof q !== "string") {
       return res.status(400).json({ error: "q harus berupa string" });
     }
+    for (const [name, value] of Object.entries({ page, limit })) {
+      if (value !== undefined && typeof value !== "string") {
+        return res.status(400).json({ error: `${name} harus berupa string` });
+      }
+    }
+    const hasPagination = page !== undefined || limit !== undefined;
+    const parsedPage = typeof page === "string" && /^\d+$/.test(page) && parseInt(page, 10) > 0 ? parseInt(page, 10) : undefined;
+    const rawLimit = typeof limit === "string" && /^\d+$/.test(limit) && parseInt(limit, 10) > 0 ? parseInt(limit, 10) : undefined;
+    if (hasPagination && (parsedPage === undefined || rawLimit === undefined)) {
+      return res.status(400).json({ error: "page dan limit harus berupa bilangan bulat positif" });
+    }
+    const parsedLimit = rawLimit === undefined ? undefined : Math.min(rawLimit, 100);
 
     if (typeof rating === "string") {
       if (!/^[1-5]$/.test(rating)) {
@@ -944,35 +979,39 @@ export const listAdminReviews = async (req: Request, res: Response, next: NextFu
       ];
     }
 
-    const [reviews, allReviews] = await Promise.all([
+    const [reviews, total, summaryAggregate, summaryByStatus] = await Promise.all([
       prisma.review.findMany({
         where,
         orderBy: { createdAt: "desc" },
+        ...(hasPagination ? { skip: (parsedPage! - 1) * parsedLimit!, take: parsedLimit } : {}),
         include: {
           user: { select: { id: true, name: true, email: true, avatarUrl: true } },
           product: { select: { id: true, name: true, images: true } },
         },
       }),
-      prisma.review.findMany({
-        select: { rating: true, status: true },
-      }),
+      hasPagination ? prisma.review.count({ where }) : Promise.resolve(0),
+      prisma.review.aggregate({ _avg: { rating: true } }),
+      prisma.review.groupBy({ by: ["status"], _count: { _all: true } }),
     ]);
 
-    const visibleCount = allReviews.filter((r) => r.status === "tampil").length;
-    const hiddenCount = allReviews.filter((r) => r.status === "disembunyikan").length;
-    const avgRating = allReviews.length > 0
-      ? Number((allReviews.reduce((sum, r) => sum + r.rating, 0) / allReviews.length).toFixed(1))
-      : 0;
+    const visibleCount = summaryByStatus.find((row) => row.status === "tampil")?._count._all || 0;
+    const hiddenCount = summaryByStatus.find((row) => row.status === "disembunyikan")?._count._all || 0;
+    const totalReviews = summaryByStatus.reduce((sum, row) => sum + row._count._all, 0);
+    const avgRating = summaryAggregate._avg.rating ? Number(summaryAggregate._avg.rating.toFixed(1)) : 0;
 
-    res.json({
+    const response: any = {
       reviews,
       summary: {
         avgRating,
         visibleCount,
         hiddenCount,
-        totalReviews: allReviews.length,
+        totalReviews,
       },
-    });
+    };
+    if (hasPagination) {
+      response.pagination = { page: parsedPage, limit: parsedLimit, total, totalPages: Math.ceil(total / parsedLimit!) };
+    }
+    res.json(response);
   } catch (err) {
     next(err);
   }

@@ -1,36 +1,67 @@
 import { Request, Response, NextFunction } from "express";
+import { createReviewForUser, listMyReviews as listMyReviewsDal } from "../dal/reviews";
 import prisma from "../lib/prisma";
 
 // GET /api/reviews — List ulasan publik (dukung filter productId)
 export const listReviews = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { productId } = req.query;
-    if (productId !== undefined && typeof productId !== "string") {
-      return res.status(400).json({ error: "productId harus berupa string" });
+    const { productId, page, limit } = req.query;
+    for (const [name, value] of Object.entries({ productId, page, limit })) {
+      if (value !== undefined && typeof value !== "string") {
+        return res.status(400).json({ error: `${name} harus berupa string` });
+      }
     }
+    const hasPagination = page !== undefined || limit !== undefined;
+    const parsedPage = typeof page === "string" && /^\d+$/.test(page) && parseInt(page, 10) > 0 ? parseInt(page, 10) : undefined;
+    const rawLimit = typeof limit === "string" && /^\d+$/.test(limit) && parseInt(limit, 10) > 0 ? parseInt(limit, 10) : undefined;
+    if (hasPagination && (parsedPage === undefined || rawLimit === undefined)) {
+      return res.status(400).json({ error: "page dan limit harus berupa bilangan bulat positif" });
+    }
+    const parsedLimit = rawLimit === undefined ? undefined : Math.min(rawLimit, 100);
     const where: any = { status: "tampil" };
 
     if (typeof productId === "string") {
       where.productId = productId;
     }
 
-    const reviews = await prisma.review.findMany({
-      where,
-      include: {
-        user: { select: { id: true, name: true, avatarUrl: true } },
-        product: { select: { id: true, name: true } },
-      },
-      orderBy: { createdAt: "desc" },
-    });
+    const reviews = hasPagination
+      ? await prisma.review.findMany({
+          where,
+          include: {
+            user: { select: { id: true, name: true, avatarUrl: true } },
+            product: { select: { id: true, name: true } },
+          },
+          orderBy: { createdAt: "desc" },
+          skip: (parsedPage! - 1) * parsedLimit!,
+          take: parsedLimit,
+        })
+      : await prisma.review.findMany({
+          where,
+          include: {
+            user: { select: { id: true, name: true, avatarUrl: true } },
+            product: { select: { id: true, name: true } },
+          },
+          orderBy: { createdAt: "desc" },
+        });
 
     // Hitung rating rata-rata (baik untuk produk spesifik maupun toko keseluruhan)
-    let avgRating = 0;
-    if (reviews.length > 0) {
-      const sum = reviews.reduce((acc, r) => acc + r.rating, 0);
-      avgRating = Number((sum / reviews.length).toFixed(1));
+    if (!hasPagination) {
+      const avgRating = reviews.length > 0
+        ? Number((reviews.reduce((acc, r) => acc + r.rating, 0) / reviews.length).toFixed(1))
+        : 0;
+      return res.json({ reviews, avgRating, totalReviews: reviews.length });
     }
 
-    res.json({ reviews, avgRating, totalReviews: reviews.length });
+    const [total, aggregate] = await Promise.all([
+      prisma.review.count({ where }),
+      prisma.review.aggregate({ where, _avg: { rating: true } }),
+    ]);
+    res.json({
+      reviews,
+      avgRating: aggregate._avg.rating ? Number(aggregate._avg.rating.toFixed(1)) : 0,
+      totalReviews: total,
+      pagination: { page: parsedPage, limit: parsedLimit, total, totalPages: Math.ceil(total / parsedLimit!) },
+    });
   } catch (err) {
     next(err);
   }
@@ -43,97 +74,7 @@ export const createReview = async (req: Request, res: Response, next: NextFuncti
       return res.status(401).json({ error: "Belum login" });
     }
 
-    const { orderItemId, rating, comment } = req.body;
-
-    const numericRating = parseInt(rating, 10);
-    if (!rating || isNaN(numericRating) || numericRating < 1 || numericRating > 5) {
-      return res.status(400).json({ error: "rating wajib diisi (angka 1-5)" });
-    }
-
-    if (!comment || typeof comment !== "string" || !comment.trim()) {
-      return res.status(400).json({ error: "comment ulasan wajib diisi" });
-    }
-
-    let productId: string | null = null;
-
-    if (orderItemId) {
-      // Ulasan produk spesifik dari pesanan
-      const orderItem = await prisma.orderItem.findUnique({
-        where: { id: orderItemId },
-        include: { order: true },
-      });
-
-      if (!orderItem) {
-        return res.status(404).json({ error: "Item pesanan tidak ditemukan" });
-      }
-
-      if (orderItem.order.userId !== req.user.id) {
-        return res.status(403).json({ error: "Kamu tidak memiliki akses memberikan ulasan untuk pesanan ini" });
-      }
-
-      if (orderItem.order.status !== "selesai") {
-        return res.status(400).json({ error: "Ulasan hanya dapat diberikan untuk pesanan yang sudah selesai" });
-      }
-
-      const existingReview = await prisma.review.findUnique({
-        where: { orderItemId },
-      });
-
-      if (existingReview) {
-        return res.status(400).json({ error: "Kamu sudah memberikan ulasan untuk item pesanan ini" });
-      }
-
-      productId = orderItem.productId;
-    } else {
-      // Ulasan umum toko: Syaratkan user pernah menyelesaikan minimal 1 pesanan & maksimal 1 ulasan toko per user
-      const completedOrder = await prisma.order.findFirst({
-        where: { userId: req.user.id, status: "selesai" },
-      });
-
-      if (!completedOrder) {
-        return res.status(403).json({
-          error: "Kamu harus pernah menyelesaikan minimal 1 pesanan di toko ini sebelum memberikan ulasan toko.",
-        });
-      }
-
-      const existingStoreReview = await prisma.review.findFirst({
-        where: { userId: req.user.id, productId: null, orderItemId: null },
-      });
-
-      if (existingStoreReview) {
-        return res.status(400).json({ error: "Kamu sudah pernah memberikan ulasan umum untuk toko ini." });
-      }
-    }
-
-    const review = await prisma.review.create({
-      data: {
-        userId: req.user.id,
-        productId,
-        orderItemId: orderItemId || null,
-        rating: numericRating,
-        comment: comment.trim(),
-        status: "tampil",
-      },
-      include: {
-        user: { select: { id: true, name: true, avatarUrl: true } },
-        product: { include: { artisan: true } },
-      },
-    });
-
-    // Jika review untuk produk spesifik, kirim notifikasi 'ulasan_baru' ke kreator pembuat produk
-    if (review.product && review.product.artisan && review.product.artisan.userId) {
-      const creatorUserId = review.product.artisan.userId;
-      if (creatorUserId !== req.user.id) {
-        await prisma.notification.create({
-          data: {
-            userId: creatorUserId,
-            type: "ulasan_baru",
-            title: "Ulasan Baru Produk",
-            body: `${req.user.name} memberikan ulasan bintang ${numericRating} untuk produk "${review.product.name}": "${comment.trim()}"`,
-          },
-        }).catch(() => {});
-      }
-    }
+    const review = await createReviewForUser(req.user, req.body);
 
     res.status(201).json({ review });
   } catch (err) {
@@ -148,13 +89,7 @@ export const listMyReviews = async (req: Request, res: Response, next: NextFunct
       return res.status(401).json({ error: "Belum login" });
     }
 
-    const reviews = await prisma.review.findMany({
-      where: { userId: req.user.id },
-      include: {
-        product: { select: { id: true, name: true, images: true, slug: true } },
-      },
-      orderBy: { createdAt: "desc" },
-    });
+    const reviews = await listMyReviewsDal(req.user);
 
     res.json({ reviews });
   } catch (err) {

@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import prisma from "../lib/prisma";
 import { getPickupSlots, getSlotCapacity } from "../lib/slots";
+import { toWibDateString } from "../lib/dates";
 
 /**
  * GET /api/slots?date=YYYY-MM-DD
@@ -15,8 +16,13 @@ export const getSlots = async (req: Request, res: Response, next: NextFunction) 
       return res.status(400).json({ error: "Parameter date wajib berformat YYYY-MM-DD" });
     }
 
+    const dateString = toWibDateString(date);
+    if (!dateString) {
+      return res.status(400).json({ error: "Parameter date wajib berformat YYYY-MM-DD" });
+    }
+
     // Parse tanggal sebagai WIB (UTC+7)
-    const dayStart = new Date(date + "T00:00:00+07:00");
+    const dayStart = new Date(dateString + "T00:00:00+07:00");
     const dayEnd = new Date(dayStart.getTime() + 86400000 - 1);
 
     // Ambil setting autoCancelEnabled
@@ -76,7 +82,7 @@ export const getSlots = async (req: Request, res: Response, next: NextFunction) 
       };
     });
 
-    res.json({ date, slots });
+    res.json({ date: dateString, slots });
   } catch (err) {
     next(err);
   }

@@ -3,6 +3,9 @@ import crypto from "crypto";
 import prisma from "../lib/prisma";
 import { cartesianProduct } from "../lib/variants";
 import { attachEffectiveStockToVariants } from "../lib/stock";
+import { getEditableProduct } from "../dal/productOwnership";
+import { isHttpsUrl, isString } from "../lib/validate";
+import { shouldCountView } from "../lib/viewDedupe";
 
 // Helper untuk membuat slug sederhana dari nama produk
 function createSlug(name: string): string {
@@ -12,15 +15,6 @@ function createSlug(name: string): string {
     .replace(/(^-|-$)/g, "");
   const randomSuffix = crypto.randomInt(1000, 10000);
   return `${base}-${randomSuffix}`;
-}
-
-function isHttpsUrl(value: unknown): value is string {
-  if (typeof value !== "string") return false;
-  try {
-    return new URL(value).protocol === "https:";
-  } catch {
-    return false;
-  }
 }
 
 function validateProductImages(images: unknown): string[] | null {
@@ -44,7 +38,8 @@ export const listProducts = async (req: Request, res: Response, next: NextFuncti
     }
 
     const parsedPage = typeof page === "string" && /^\d+$/.test(page) && parseInt(page, 10) > 0 ? parseInt(page, 10) : undefined;
-    const parsedLimit = typeof limit === "string" && /^\d+$/.test(limit) && parseInt(limit, 10) > 0 ? parseInt(limit, 10) : undefined;
+    const rawLimit = typeof limit === "string" && /^\d+$/.test(limit) && parseInt(limit, 10) > 0 ? parseInt(limit, 10) : undefined;
+    const parsedLimit = rawLimit === undefined ? undefined : Math.min(rawLimit, 100);
     if ((page !== undefined && parsedPage === undefined) || (limit !== undefined && parsedLimit === undefined)) {
       return res.status(400).json({ error: "page dan limit harus berupa bilangan bulat positif" });
     }
@@ -126,18 +121,16 @@ export const listProducts = async (req: Request, res: Response, next: NextFuncti
     }
 
     // Lampirkan effectiveStock ke tiap varian + rating info
-    const productsWithStock = await Promise.all(
-      products.map(async (p) => {
-        const variantsWithStock = await attachEffectiveStockToVariants(p.variants);
-        const stats = ratingMap[p.id] || { avgRating: 0, reviewCount: 0 };
-        return {
-          ...p,
-          avgRating: stats.avgRating,
-          reviewCount: stats.reviewCount,
-          variants: variantsWithStock,
-        };
-      })
-    );
+    const allVariants = products.flatMap((product) => product.variants);
+    const allVariantsWithStock = await attachEffectiveStockToVariants(allVariants);
+    const variantsByProduct = new Map<string, typeof allVariantsWithStock>();
+    for (const product of products) {
+      variantsByProduct.set(product.id, allVariantsWithStock.filter((variant) => product.variants.some((item) => item.id === variant.id)));
+    }
+    const productsWithStock = products.map((p) => {
+      const stats = ratingMap[p.id] || { avgRating: 0, reviewCount: 0 };
+      return { ...p, avgRating: stats.avgRating, reviewCount: stats.reviewCount, variants: variantsByProduct.get(p.id) || [] };
+    });
 
     const responseData: any = { products: productsWithStock };
     if (parsedPage !== undefined && parsedLimit !== undefined && total !== undefined) {
@@ -186,10 +179,12 @@ export const getProductById = async (req: Request, res: Response, next: NextFunc
       return res.status(404).json({ error: "Produk tidak ditemukan atau tidak aktif" });
     }
 
-    await prisma.product.update({
-      where: { id },
-      data: { viewCount: { increment: 1 } },
-    });
+    if (shouldCountView(id, req)) {
+      await prisma.product.update({
+        where: { id },
+        data: { viewCount: { increment: 1 } },
+      });
+    }
 
     const variantsWithStock = await attachEffectiveStockToVariants(product.variants);
 
@@ -235,11 +230,14 @@ export const createProduct = async (req: Request, res: Response, next: NextFunct
     const parsedPrice = typeof price === "number" && Number.isInteger(price)
       ? price
       : typeof price === "string" && /^\d+$/.test(price) ? Number(price) : NaN;
-    if (!Number.isInteger(parsedPrice) || parsedPrice <= 0) {
+    if (!Number.isInteger(parsedPrice) || parsedPrice <= 0 || parsedPrice > 2147483647) {
       return res.status(400).json({ error: "price harus berupa angka bulat positif" });
     }
-    if (typeof name !== "string" || !name.trim() || typeof description !== "string" || !description.trim()) {
+    if (!isString(name, { max: 191 }) || !name.trim() || !isString(description) || !description.trim()) {
       return res.status(400).json({ error: "name dan description wajib berupa teks" });
+    }
+    if (shortDescription !== undefined && !isString(shortDescription, { max: 191 })) {
+      return res.status(400).json({ error: "shortDescription harus berupa string maksimal 191 karakter" });
     }
     if (typeof categoryId !== "string" || !categoryId) {
       return res.status(400).json({ error: "categoryId wajib berupa string" });
@@ -393,22 +391,7 @@ export const updateProduct = async (req: Request, res: Response, next: NextFunct
     }
 
     const { id } = req.params;
-    const existing = await prisma.product.findUnique({
-      where: { id },
-      include: { artisan: true },
-    });
-
-    if (!existing) {
-      return res.status(404).json({ error: "Produk tidak ditemukan" });
-    }
-
-    // Validasi kepemilikan jika role === creator
-    if (req.user.role === "creator") {
-      const artisan = await prisma.artisan.findUnique({ where: { userId: req.user.id } });
-      if (!artisan || existing.artisanId !== artisan.id) {
-        return res.status(403).json({ error: "Kamu tidak memiliki akses untuk mengubah produk ini" });
-      }
-    }
+    await getEditableProduct(req.user, id);
 
     const {
       name,
@@ -426,9 +409,18 @@ export const updateProduct = async (req: Request, res: Response, next: NextFunct
       const parsedPrice = typeof price === "number" && Number.isInteger(price)
         ? price
         : typeof price === "string" && /^\d+$/.test(price) ? Number(price) : NaN;
-      if (!Number.isInteger(parsedPrice) || parsedPrice <= 0) {
+    if (!Number.isInteger(parsedPrice) || parsedPrice <= 0 || parsedPrice > 2147483647) {
         return res.status(400).json({ error: "price harus berupa angka bulat positif" });
       }
+    }
+    if (name !== undefined && (!isString(name, { max: 191 }) || !name.trim())) {
+      return res.status(400).json({ error: "name harus berupa teks maksimal 191 karakter" });
+    }
+    if (shortDescription !== undefined && !isString(shortDescription, { max: 191 })) {
+      return res.status(400).json({ error: "shortDescription harus berupa string maksimal 191 karakter" });
+    }
+    if (description !== undefined && !isString(description)) {
+      return res.status(400).json({ error: "description harus berupa teks" });
     }
     if (categoryId !== undefined) {
       if (typeof categoryId !== "string" || !categoryId) {
@@ -527,24 +519,20 @@ export const upsertStory = async (req: Request, res: Response, next: NextFunctio
     const { id } = req.params;
     const { title, content, process, coverImageUrl, processImages } = req.body;
 
-    if (!title || !content) {
+    if (!isString(title, { max: 191 }) || !title.trim() || !isString(content, { max: 10000 }) || !content.trim()) {
       return res.status(400).json({ error: "title dan content cerita wajib diisi" });
     }
     if (process !== undefined && process !== null && typeof process !== "string") {
       return res.status(400).json({ error: "process harus berupa string atau null" });
     }
-
-    const product = await prisma.product.findUnique({ where: { id } });
-    if (!product) {
-      return res.status(404).json({ error: "Produk tidak ditemukan" });
+    if (coverImageUrl !== undefined && coverImageUrl !== null && !isHttpsUrl(coverImageUrl)) {
+      return res.status(400).json({ error: "coverImageUrl harus berupa URL HTTPS" });
+    }
+    if (processImages !== undefined && (!Array.isArray(processImages) || processImages.length > 10 || processImages.some((image) => !isHttpsUrl(image)))) {
+      return res.status(400).json({ error: "processImages harus berupa maksimal 10 URL HTTPS" });
     }
 
-    if (req.user.role === "creator") {
-      const artisan = await prisma.artisan.findUnique({ where: { userId: req.user.id } });
-      if (!artisan || product.artisanId !== artisan.id) {
-        return res.status(403).json({ error: "Kamu tidak memiliki akses ke cerita produk ini" });
-      }
-    }
+    await getEditableProduct(req.user, id);
 
     const story = await prisma.productStory.upsert({
       where: { productId: id },
@@ -615,18 +603,13 @@ export const listMyProducts = async (req: Request, res: Response, next: NextFunc
       }
     }
 
-    const productsWithStock = await Promise.all(
-      products.map(async (p) => {
-        const variantsWithStock = await attachEffectiveStockToVariants(p.variants);
-        const stats = ratingMap[p.id] || { avgRating: 0, reviewCount: 0 };
-        return {
-          ...p,
-          avgRating: stats.avgRating,
-          reviewCount: stats.reviewCount,
-          variants: variantsWithStock,
-        };
-      })
-    );
+    const allVariants = products.flatMap((product) => product.variants);
+    const allVariantsWithStock = await attachEffectiveStockToVariants(allVariants);
+    const productsWithStock = products.map((p) => {
+      const stats = ratingMap[p.id] || { avgRating: 0, reviewCount: 0 };
+      const variants = allVariantsWithStock.filter((variant) => p.variants.some((item) => item.id === variant.id));
+      return { ...p, avgRating: stats.avgRating, reviewCount: stats.reviewCount, variants };
+    });
 
     res.json({ products: productsWithStock });
   } catch (err) {

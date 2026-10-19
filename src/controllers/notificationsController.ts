@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from "express";
-import prisma from "../lib/prisma";
+import { listMyNotifications, markAllRead, markNotificationRead } from "../dal/notifications";
 
 // GET /api/notifications — List notifikasi in-app milik user yang sedang login
 export const getNotifications = async (req: Request, res: Response, next: NextFunction) => {
@@ -8,10 +8,7 @@ export const getNotifications = async (req: Request, res: Response, next: NextFu
       return res.status(401).json({ error: "Belum login" });
     }
 
-    const notifications = await prisma.notification.findMany({
-      where: { userId: req.user.id },
-      orderBy: { createdAt: "desc" },
-    });
+    const notifications = await listMyNotifications(req.user);
 
     const unreadCount = notifications.filter((n) => !n.isRead).length;
 
@@ -30,19 +27,7 @@ export const markAsRead = async (req: Request, res: Response, next: NextFunction
 
     const { id } = req.params;
 
-    const notification = await prisma.notification.findUnique({ where: { id } });
-    if (!notification) {
-      return res.status(404).json({ error: "Notifikasi tidak ditemukan" });
-    }
-
-    if (notification.userId !== req.user.id) {
-      return res.status(403).json({ error: "Kamu tidak memiliki akses ke notifikasi ini" });
-    }
-
-    const updated = await prisma.notification.update({
-      where: { id },
-      data: { isRead: true },
-    });
+    const updated = await markNotificationRead(req.user, id);
 
     res.json({ notification: updated });
   } catch (err) {
@@ -57,10 +42,7 @@ export const markAllAsRead = async (req: Request, res: Response, next: NextFunct
       return res.status(401).json({ error: "Belum login" });
     }
 
-    await prisma.notification.updateMany({
-      where: { userId: req.user.id, isRead: false },
-      data: { isRead: true },
-    });
+    await markAllRead(req.user);
 
     res.json({ message: "Seluruh notifikasi berhasil ditandai sudah dibaca" });
   } catch (err) {

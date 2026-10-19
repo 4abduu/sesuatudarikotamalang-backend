@@ -7,10 +7,10 @@ import { Request, Response, NextFunction } from "express";
 export function requireRole(...allowedRoles: string[]) {
   return (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) {
-      return res.status(401).json({ error: "Belum login" });
+      return res.status(401).json({ error: "Belum login", code: "UNAUTHORIZED" });
     }
     if (!allowedRoles.includes(req.user.role)) {
-      return res.status(403).json({ error: "Tidak punya akses untuk resource ini" });
+      return res.status(403).json({ error: "Tidak punya akses untuk resource ini", code: "FORBIDDEN" });
     }
     next();
   };

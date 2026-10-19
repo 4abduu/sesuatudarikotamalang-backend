@@ -5,6 +5,8 @@ import {
   otpRequestLimiter,
   otpVerifyLimiter,
   registerLimiter,
+  googleLoginLimiter,
+  changePasswordLimiter,
 } from "../middleware/rateLimiter";
 import authController from "../controllers/authController";
 
@@ -17,7 +19,7 @@ router.post("/register", registerLimiter, authController.register);
 router.post("/login", loginLimiter, authController.login);
 
 // POST /api/auth/google — Login/Register via Google Sign-In
-router.post("/google", authController.googleLogin);
+router.post("/google", googleLoginLimiter, authController.googleLogin);
 
 // POST /api/auth/forgot-password/request
 router.post("/forgot-password/request", otpRequestLimiter, authController.forgotPasswordRequest);
@@ -32,7 +34,10 @@ router.post("/change-email/request", otpRequestLimiter, requireAuth, authControl
 router.post("/change-email/verify", otpVerifyLimiter, requireAuth, authController.changeEmailVerify);
 
 // POST /api/auth/change-password — Ganti password user yang sedang login
-router.post("/change-password", requireAuth, authController.changePassword);
+router.post("/change-password", requireAuth, changePasswordLimiter, authController.changePassword);
+
+// POST /api/auth/logout — Cabut token perangkat ini
+router.post("/logout", requireAuth, authController.logout);
 
 // GET /api/auth/me — Cek profil user yang sedang login
 router.get("/me", requireAuth, authController.getMe);

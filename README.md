@@ -73,4 +73,54 @@ Salin `.env.example` ke `.env` dan isi variabel berikut. Nilai sesungguhnya diba
 | `DATABASE_URL` | Wajib | Server tidak bisa terhubung ke database |
 | `MIDTRANS_SERVER_KEY`, dll. | Untuk pembayaran | Pembuatan order Midtrans gagal |
 
+## Autentikasi & Otorisasi
+
+Backend mendukung registrasi, login email dan password, Google Sign-In, serta logout melalui `POST /api/auth/logout`. JWT berlaku 7 hari dan dikirim pada header `Authorization: Bearer <token>`. JWT dipakai karena sesuai untuk klien mobile dan tidak membutuhkan sesi server per request; komprominya adalah token sulit dicabut sebelum kedaluwarsa. Mitigasinya adalah denylist saat logout, `passwordChangedAt` saat ganti/reset password, dan pembacaan role terbaru dari database pada setiap request.
+
+Password tidak pernah disimpan sebagai plain text dan di-hash dengan bcrypt. OTP berlaku 10 menit, disimpan sebagai HMAC-SHA256, dan hangus setelah 5 percobaan salah pada kode yang sama. `OTP_PEPPER` dapat diisi sebagai kunci khusus; bila kosong, kunci diturunkan dari `JWT_SECRET`.
+
+| Role | Akses utama |
+|---|---|
+| `buyer` | katalog, pencarian, order milik sendiri, pembayaran, notifikasi dan ulasan milik sendiri, pengajuan konsinyasi |
+| `creator` | seluruh akses buyer yang relevan, serta profil kreator, produk, cerita, dan stok miliknya |
+| `admin` | dashboard, seluruh order, aplikasi konsinyasi, produk, ulasan, pengaturan, dan perubahan status administratif |
+
+Penegakan dilakukan berlapis: `requireAuth` dan `requireRole` untuk pemeriksaan kasar, policy/DAL untuk batas sebenarnya, serta kolom pemilik pada setiap query resource privat. `401` dengan `code: "UNAUTHORIZED"` berarti login ulang; `403` dengan `code: "FORBIDDEN"` berarti role atau izin tidak mencukupi; resource milik pengguna lain dikembalikan sebagai `404`. Token berada di header, bukan cookie, sehingga endpoint API ini tidak menggunakan cookie authentication dan tidak memerlukan mitigasi CSRF berbasis cookie.
+
+### Akun uji untuk penilaian
+
+Akun demo terpisah dibuat oleh seed hanya jika `SEED_DEMO_PASSWORD` diisi. Seed bersifat idempoten dan tidak mengubah akun demo yang sudah ada.
+
+| Role | Email bawaan | Password |
+|---|---|---|
+| admin | `demo.admin@sesuatu.test` | `Admin123` |
+| creator | `demo.creator@sesuatu.test` | `Creator123` |
+| buyer | `demo.buyer@sesuatu.test` | `Buyer123` |
+
+Email dapat diganti melalui `SEED_DEMO_ADMIN_EMAIL`, `SEED_DEMO_CREATOR_EMAIL`, dan `SEED_DEMO_BUYER_EMAIL`. Jalankan seed setelah menyiapkan database dan environment:
+
+```bash
+npm run prisma:seed
+```
+
+### Cara menguji
+
+```bash
+# Login
+curl -X POST http://localhost:4000/api/auth/login -H "Content-Type: application/json" -d '{"email":"demo.buyer@sesuatu.test","password":"<PASSWORD>"}'
+
+# Tanpa token -> 401 UNAUTHORIZED
+curl http://localhost:4000/api/auth/me
+
+# Buyer ke endpoint admin -> 403 FORBIDDEN
+curl http://localhost:4000/api/admin/dashboard -H "Authorization: Bearer <TOKEN_BUYER>"
+
+# Pengguna A membuka order pengguna B -> 404
+curl http://localhost:4000/api/orders/<ORDER_MILIK_B> -H "Authorization: Bearer <TOKEN_A>"
+
+# Logout lalu token yang sama -> request berikutnya 401
+curl -X POST http://localhost:4000/api/auth/logout -H "Authorization: Bearer <TOKEN>"
+curl http://localhost:4000/api/auth/me -H "Authorization: Bearer <TOKEN>"
+```
+
 > **Catatan:** variabel `GEMINI_API_KEY` dan `GEMINI_MODEL` harus diisi (tidak boleh hanya spasi) agar fitur AI aktif — nilai kosong `""` disamakan dengan tidak terkonfigurasi.

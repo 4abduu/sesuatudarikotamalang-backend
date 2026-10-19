@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import prisma from "../lib/prisma";
+import crypto from "crypto";
 
 export interface JwtPayload {
   id: string;
@@ -16,19 +17,25 @@ export interface JwtPayload {
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   const header = req.headers.authorization;
   if (!header || !header.startsWith("Bearer ")) {
-    return res.status(401).json({ error: "Token tidak ditemukan" });
+    return res.status(401).json({ error: "Token tidak ditemukan", code: "UNAUTHORIZED" });
   }
 
   const token = header.split(" ")[1];
   let payload: JwtPayload;
 
   try {
-    payload = jwt.verify(token, process.env.JWT_SECRET || "") as JwtPayload;
+    payload = jwt.verify(token, process.env.JWT_SECRET || "", { algorithms: ["HS256"] }) as JwtPayload;
   } catch (err) {
-    return res.status(401).json({ error: "Token tidak valid atau kadaluarsa" });
+    return res.status(401).json({ error: "Token tidak valid atau kadaluarsa", code: "UNAUTHORIZED" });
   }
 
   try {
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+    const revokedToken = await prisma.revokedToken.findUnique({ where: { tokenHash } });
+    if (revokedToken) {
+      return res.status(401).json({ error: "Sesi sudah berakhir. Silakan masuk kembali", code: "UNAUTHORIZED" });
+    }
+
     // Ambil data user & role terbaru langsung dari DB untuk mencegah klaim JWT basi
     const dbUser = await prisma.user.findUnique({
       where: { id: payload.id },
@@ -36,7 +43,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     });
 
     if (!dbUser) {
-      return res.status(401).json({ error: "User sudah tidak terdaftar di sistem" });
+      return res.status(401).json({ error: "User sudah tidak terdaftar di sistem", code: "UNAUTHORIZED" });
     }
 
     // F-26: pencabutan token hanya bila kredensial berubah (ganti/reset password, ganti email, link Google).
@@ -47,7 +54,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       dbUser.passwordChangedAt &&
       Math.floor(dbUser.passwordChangedAt.getTime() / 1000) > payload.iat
     ) {
-      return res.status(401).json({ error: "Sesi kedaluwarsa setelah perubahan akun" });
+      return res.status(401).json({ error: "Sesi kedaluwarsa setelah perubahan akun", code: "UNAUTHORIZED" });
     }
 
     const { passwordChangedAt: _pca, ...user } = dbUser;

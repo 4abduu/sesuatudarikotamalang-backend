@@ -23,6 +23,12 @@ const suites = [
   "test_p2_integrity.js",
   "test_p3_hardening.js",
   "test_routes_mounted.js",
+  "test_pickup_date_validation.js",
+  "test_typed_errors.js",
+  "test_policies.js",
+  "test_dal_isolation.js",
+  "test_cancel_order_atomic.js",
+  "test_dal_boundary.js",
   // Fase fitur
   "test_fase13.js",
   "test_paketa_features.js",
@@ -41,6 +47,15 @@ const suites = [
   "test_change_email_flow.js",     // Langkah 2: alur ganti email
   "test_tx_retry.js",              // Langkah 3: retry deadlock
   "test_admin_status_transitions.js", // Langkah 4: transisi status admin
+  "test_admin_status_lock.js",        // Langkah 4a: kunci baris update status
+  "test_input_validation.js",         // Langkah 4b: tipe dan batas input
+  "test_result_caps.js",               // Langkah 4c: batas hasil
+  "test_rate_limiters.js",              // Langkah 4d: pemasangan limiter
+  "test_reviews_pagination.js",         // Langkah 4g: paginasi ulasan
+  "test_view_dedupe.js",                 // Langkah 4g: dedupe viewCount
+  "test_stock_batch.js",                 // Langkah 4g: stok batch
+  "test_logout.js",                      // Langkah 5: logout dan denylist
+  "test_otp_hardening.js",               // Langkah 5: pengerasan OTP
   // TIDAK dimasukkan: test_ai_integration.js (butuh server live + Gemini sungguhan)
   // TIDAK dimasukkan: test-cloudinary.js (butuh jaringan + kredensial Cloudinary)
 ];

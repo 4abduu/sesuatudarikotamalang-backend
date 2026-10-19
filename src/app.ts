@@ -16,6 +16,15 @@ if (missingEnvs.length > 0) {
   process.exit(1);
 }
 
+if (process.env.JWT_SECRET && process.env.JWT_SECRET.length < 32) {
+  const message = "JWT_SECRET harus memiliki panjang minimal 32 karakter";
+  if (process.env.NODE_ENV === "production") {
+    console.error(`[FATAL ERROR] ${message}`);
+    process.exit(1);
+  }
+  console.warn(`[WARNING] ${message}`);
+}
+
 const optionalEnvs = ["MIDTRANS_SERVER_KEY", "RESEND_API_KEY", "GOOGLE_CLIENT_ID", "CORS_ALLOWED_ORIGINS"].filter(
   (env) => !requiredEnvs.includes(env)
 );
@@ -38,6 +47,8 @@ import categoriesRoutes from "./routes/categoriesRoutes";
 import slotsRoutes from "./routes/slotsRoutes";
 import settingsRoutes from "./routes/settingsRoutes";
 import aiRoutes from "./routes/aiRoutes";
+import { HttpError } from "./lib/httpError";
+import { apiLimiter } from "./middleware/rateLimiter";
 
 const app = express();
 
@@ -84,6 +95,7 @@ app.get("/", (_req: Request, res: Response) => {
   res.json({ status: "ok", message: "Sesuatu DariKota Malang API is running" });
 });
 
+app.use("/api", apiLimiter);
 app.use("/api/auth", authRoutes);
 app.use("/api/categories", categoriesRoutes);
 app.use("/api/products", productsRoutes);
@@ -105,7 +117,7 @@ app.use((_req: Request, res: Response) => {
 });
 
 // Error handler — jangan pernah log password atau token ke console
-app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
+export const errorHandler = (err: any, req: Request, res: Response, _next: NextFunction) => {
   // Sanitasi: hapus field sensitif dari body sebelum log
   const sanitizedBody = req.body ? { ...req.body } : {};
   const sensitiveFields = ["password", "oldPassword", "newPassword", "token", "idToken", "code"];
@@ -130,8 +142,15 @@ app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
         : err.message || "Internal server error"
       : err.message;
 
-  res.status(statusCode).json({ error: responseMessage });
-});
+  const response: { error: string; code?: string } = { error: responseMessage };
+  if (err instanceof HttpError && statusCode < 500 && err.code) {
+    response.code = err.code;
+  }
+
+  res.status(statusCode).json(response);
+};
+
+app.use(errorHandler);
 
 // F-11: Handler unhandledRejection & uncaughtException
 process.on("unhandledRejection", (reason) => {

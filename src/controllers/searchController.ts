@@ -8,6 +8,9 @@ export const search = async (req: Request, res: Response, next: NextFunction) =>
     if (req.query.q !== undefined && typeof req.query.q !== "string") {
       return res.status(400).json({ error: "q harus berupa string" });
     }
+    if (typeof req.query.q === "string" && req.query.q.length > 100) {
+      return res.status(400).json({ error: "q maksimal 100 karakter" });
+    }
     const q = typeof req.query.q === "string" ? req.query.q.trim().toLowerCase() : "";
 
     if (!q) {
@@ -35,6 +38,7 @@ export const search = async (req: Request, res: Response, next: NextFunction) =>
           story: true,
         },
         orderBy: { createdAt: "desc" },
+        take: 50,
       }),
       prisma.artisan.findMany({
         where: {
@@ -48,6 +52,7 @@ export const search = async (req: Request, res: Response, next: NextFunction) =>
           products: { where: { isActive: true } },
         },
         orderBy: { createdAt: "desc" },
+        take: 50,
       }),
     ]);
 
@@ -74,18 +79,13 @@ export const search = async (req: Request, res: Response, next: NextFunction) =>
     }
 
     // F-25: Lampirkan effectiveStock ke tiap varian produk di pencarian + rating info
-    const productsWithStock = await Promise.all(
-      products.map(async (p) => {
-        const variantsWithStock = await attachEffectiveStockToVariants(p.variants);
-        const stats = ratingMap[p.id] || { avgRating: 0, reviewCount: 0 };
-        return {
-          ...p,
-          avgRating: stats.avgRating,
-          reviewCount: stats.reviewCount,
-          variants: variantsWithStock,
-        };
-      })
-    );
+    const allVariants = products.flatMap((product) => product.variants);
+    const allVariantsWithStock = await attachEffectiveStockToVariants(allVariants);
+    const productsWithStock = products.map((p) => {
+      const stats = ratingMap[p.id] || { avgRating: 0, reviewCount: 0 };
+      const variants = allVariantsWithStock.filter((variant) => p.variants.some((item) => item.id === variant.id));
+      return { ...p, avgRating: stats.avgRating, reviewCount: stats.reviewCount, variants };
+    });
 
     // A3: Agregasi rating & productCount untuk kreator
     const creatorIds = creators.map((c) => c.id);

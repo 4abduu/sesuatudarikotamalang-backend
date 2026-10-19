@@ -108,6 +108,7 @@ function assert(cond, msg) {
   // ── Request sukses: OTP ke email LAMA, options.newEmail terisi ───────────────
   const newEmail = `efa-new-${SUFFIX}@test.local`;
   const captured = {};
+  const capturedSecond = {};
   await test("request sukses: OTP dikirim ke email LAMA", async () => {
     const r = await invokeRequest(authA, { newEmail }, captured);
     assert(r.status === 200, `status ${r.status}`);
@@ -118,7 +119,7 @@ function assert(cond, msg) {
   await test("pesan sukses tidak memuat kata 'baru' di awal konteks email", async () => {
     // Pesan baru: "Kode OTP telah dikirim ke email Anda saat ini"
     // (tidak memuat "email baru Anda")
-    const r = await invokeRequest(authA, { newEmail: `efa-new2-${SUFFIX}@test.local` }, {});
+    const r = await invokeRequest(authA, { newEmail: `efa-new2-${SUFFIX}@test.local` }, capturedSecond);
     assert(r.status === 200, `status ${r.status}`);
     assert(!r.data.message.includes("email baru Anda"), `pesan masih: "${r.data.message}"`);
   });
@@ -138,7 +139,7 @@ function assert(cond, msg) {
 
   await test("verify OTP benar mengganti email (200)", async () => {
     assert(otp, "OTP tidak ditemukan di DB");
-    const r = await invokeVerify(authA, { code: otp.code });
+    const r = await invokeVerify(authA, { code: capturedSecond.code });
     assert(r.status === 200, `status ${r.status}`);
     assert(r.data.email === otp.targetEmail, `email = ${r.data.email}`);
     // Cek DB
@@ -164,7 +165,7 @@ function assert(cond, msg) {
     await prisma.user.create({
       data: { name: "Racer", email: thirdEmail, role: "buyer" },
     });
-    const r = await invokeVerify({ id: userA.id, role: "buyer" }, { code: otp2.code });
+    const r = await invokeVerify({ id: userA.id, role: "buyer" }, { code: captured2.code });
     assert(r.status === 409, `status ${r.status} (expected 409)`);
   });
 

@@ -5,6 +5,8 @@ import { effectiveStock } from "../lib/stock";
 import { snap } from "../lib/midtrans";
 import { getPickupSlots, getSlotCapacity } from "../lib/slots";
 import { isRetryableTransactionError } from "../lib/txRetry";
+import { toWibDateString, todayWibString } from "../lib/dates";
+import { cancelOrderForUser, getOrderForUser, listMyOrders } from "../dal/orders";
 
 // GET /api/orders — Riwayat pesanan milik user yang sedang login
 export const listOrders = async (req: Request, res: Response, next: NextFunction) => {
@@ -13,21 +15,7 @@ export const listOrders = async (req: Request, res: Response, next: NextFunction
       return res.status(401).json({ error: "Belum login" });
     }
 
-    const orders = await prisma.order.findMany({
-      where: { userId: req.user.id },
-      include: {
-        items: {
-          include: {
-            product: {
-              include: { artisan: { select: { id: true, brandName: true } } },
-            },
-            variant: true,
-          },
-        },
-        payment: true,
-      },
-      orderBy: { createdAt: "desc" },
-    });
+    const orders = await listMyOrders(req.user);
     res.json({ orders });
   } catch (err) {
     next(err);
@@ -43,30 +31,7 @@ export const getOrderById = async (req: Request, res: Response, next: NextFuncti
 
     const { id } = req.params;
 
-    const order = await prisma.order.findUnique({
-      where: { id },
-      include: {
-        user: { select: { id: true, name: true, email: true } },
-        items: {
-          include: {
-            product: {
-              include: { artisan: { select: { id: true, brandName: true } } },
-            },
-            variant: true,
-          },
-        },
-        payment: true,
-      },
-    });
-
-    if (!order) {
-      return res.status(404).json({ error: "Pesanan tidak ditemukan" });
-    }
-
-    // Hanya pemilik pesanan atau admin yang boleh melihat detail
-    if (order.userId !== req.user.id && req.user.role !== "admin") {
-      return res.status(403).json({ error: "Tidak memiliki akses ke pesanan ini" });
-    }
+    const order = await getOrderForUser(req.user, id);
 
     res.json({ order });
   } catch (err) {
@@ -83,6 +48,18 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
 
     const { productId, variantId, pickupDate, pickupSlot, paymentMethod } = req.body;
 
+    if (
+      typeof productId !== "string" ||
+      typeof pickupDate !== "string" ||
+      typeof pickupSlot !== "string" ||
+      typeof paymentMethod !== "string" ||
+      (variantId !== undefined && variantId !== null && typeof variantId !== "string")
+    ) {
+      return res.status(400).json({
+        error: "productId, pickupDate, pickupSlot, dan paymentMethod wajib diisi",
+      });
+    }
+
     if (!productId || !pickupDate || !pickupSlot || !paymentMethod) {
       return res.status(400).json({
         error: "productId, pickupDate, pickupSlot, dan paymentMethod wajib diisi",
@@ -92,6 +69,7 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
     if (!["midtrans", "cod"].includes(paymentMethod)) {
       return res.status(400).json({ error: "paymentMethod harus 'midtrans' atau 'cod'" });
     }
+    const normalizedPaymentMethod = paymentMethod as "midtrans" | "cod";
 
     // A8: Validasi pickupSlot terhadap daftar slot yang dikonfigurasi
     const configuredSlots = getPickupSlots();
@@ -99,20 +77,19 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
       return res.status(400).json({ error: `pickupSlot tidak valid. Slot tersedia: ${configuredSlots.join(", ")}` });
     }
 
-    // A8: Validasi pickupDate — tidak di masa lalu dan dalam jendela 14 hari
-    // Mendukung format YYYY-MM-DD maupun ISO string ("2026-10-11T...")
-    const pickupDateStr = typeof pickupDate === "string" && pickupDate.includes("T")
-      ? pickupDate.split("T")[0]
-      : String(pickupDate).slice(0, 10);
+    // A8: Validasi pickupDate — tidak di masa lalu dan dalam jendela 14 hari.
+    const pickupDateStr = toWibDateString(pickupDate);
+    if (!pickupDateStr) {
+      return res.status(400).json({ error: "pickupDate tidak valid (format YYYY-MM-DD)" });
+    }
 
-    const WIB_OFFSET_MS = 7 * 60 * 60 * 1000;
-    const nowWIB = new Date(Date.now() + WIB_OFFSET_MS);
-    const todayWIBStr = `${nowWIB.getUTCFullYear()}-${String(nowWIB.getUTCMonth() + 1).padStart(2, "0")}-${String(nowWIB.getUTCDate()).padStart(2, "0")}`;
+    const todayWIBStr = todayWibString();
     if (pickupDateStr < todayWIBStr) {
       return res.status(400).json({ error: "pickupDate tidak boleh di masa lalu" });
     }
-    const maxDate = new Date(Date.UTC(nowWIB.getUTCFullYear(), nowWIB.getUTCMonth(), nowWIB.getUTCDate() + 14));
-    const maxDateStr = `${maxDate.getUTCFullYear()}-${String(maxDate.getUTCMonth() + 1).padStart(2, "0")}-${String(maxDate.getUTCDate()).padStart(2, "0")}`;
+    const maxDate = new Date(`${todayWIBStr}T00:00:00Z`);
+    maxDate.setUTCDate(maxDate.getUTCDate() + 14);
+    const maxDateStr = maxDate.toISOString().slice(0, 10);
     if (pickupDateStr > maxDateStr) {
       return res.status(400).json({ error: "pickupDate maksimal 14 hari dari hari ini" });
     }
@@ -291,7 +268,7 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
 
       // Batas Pengambilan untuk Midtrans Lunas (Default 14 hari)
       const pickupDeadline = isMidtrans
-        ? new Date(new Date(pickupDate).getTime() + (settings?.pickupDeadlineDays || 14) * 86400000)
+        ? new Date(new Date(pickupDateStr).getTime() + (settings?.pickupDeadlineDays || 14) * 86400000)
         : null;
 
       // 6. Buat Record Order + OrderItem
@@ -299,10 +276,10 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
         data: {
           orderNumber,
           userId,
-          paymentMethod,
+          paymentMethod: normalizedPaymentMethod,
           status: "menunggu_bayar", // Berstatus awal menunggu_bayar baik COD maupun Midtrans
           totalAmount: product.price,
-          pickupDate: new Date(pickupDate),
+          pickupDate: new Date(pickupDateStr),
           pickupSlot,
           holdExpiresAt,
           pickupDeadline,
@@ -393,29 +370,7 @@ export const cancelOrder = async (req: Request, res: Response, next: NextFunctio
 
     const { id } = req.params;
 
-    const order = await prisma.order.findUnique({ where: { id } });
-    if (!order) {
-      return res.status(404).json({ error: "Pesanan tidak ditemukan" });
-    }
-
-    if (order.userId !== req.user.id && req.user.role !== "admin") {
-      return res.status(403).json({ error: "Tidak memiliki akses ke pesanan ini" });
-    }
-
-    if (req.user.role !== "admin" && (order.status === "lunas" || order.status === "lewat_batas_pengambilan")) {
-      return res.status(403).json({
-        error: "Pesanan yang sudah lunas atau lewat batas pengambilan hanya bisa dibatalkan oleh Admin.",
-      });
-    }
-
-    if (order.status === "selesai" || order.status === "dibatalkan" || order.status === "kedaluwarsa") {
-      return res.status(400).json({ error: `Pesanan yang sudah berstatus ${order.status} tidak dapat dibatalkan` });
-    }
-
-    const updatedOrder = await prisma.order.update({
-      where: { id },
-      data: { status: "dibatalkan" },
-    });
+    const updatedOrder = await cancelOrderForUser(req.user, id);
 
     res.json({ message: "Pesanan berhasil dibatalkan", order: updatedOrder });
   } catch (err) {
@@ -432,14 +387,7 @@ export const repayOrder = async (req: Request, res: Response, next: NextFunction
 
     const { id } = req.params;
 
-    const order = await prisma.order.findUnique({ where: { id } });
-    if (!order) {
-      return res.status(404).json({ error: "Pesanan tidak ditemukan" });
-    }
-
-    if (order.userId !== req.user.id && req.user.role !== "admin") {
-      return res.status(403).json({ error: "Tidak memiliki akses ke pesanan ini" });
-    }
+    const order = await getOrderForUser(req.user, id, {});
 
     if (order.paymentMethod !== "midtrans") {
       return res.status(400).json({ error: "Pesanan ini tidak menggunakan metode pembayaran Midtrans" });

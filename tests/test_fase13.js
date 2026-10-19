@@ -121,7 +121,7 @@ async function runTests() {
   const reqResOrder1 = createMockReqRes(
     {
       productId: singleStockProduct.id,
-      pickupDate: new Date().toISOString(),
+      pickupDate: new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10),
       pickupSlot: "10:00",
       paymentMethod: "cod",
     },
@@ -140,7 +140,7 @@ async function runTests() {
   const reqResOrder2 = createMockReqRes(
     {
       productId: singleStockProduct.id,
-      pickupDate: new Date().toISOString(),
+      pickupDate: new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10),
       pickupSlot: "10:00",
       paymentMethod: "cod",
     },
@@ -387,7 +387,7 @@ async function runTests() {
   const reqResP5a = createMockReqRes(
     {
       productId: productHoldP5.id,
-      pickupDate: new Date().toISOString(),
+      pickupDate: new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10),
       pickupSlot: "10:00",
       paymentMethod: "cod",
     },
@@ -421,7 +421,7 @@ async function runTests() {
   const reqResP5b = createMockReqRes(
     {
       productId: productHoldP5.id,
-      pickupDate: new Date().toISOString(),
+      pickupDate: new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10),
       pickupSlot: "10:00",
       paymentMethod: "cod",
     },
@@ -491,7 +491,7 @@ async function runTests() {
   const reqResMidP5 = createMockReqRes(
     {
       productId: productMidP5.id,
-      pickupDate: new Date().toISOString(),
+      pickupDate: new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10),
       pickupSlot: "10:00",
       paymentMethod: "cod",
     },
@@ -527,3 +527,4 @@ runTests()
   .finally(async () => {
     await prisma.$disconnect();
   });
+  

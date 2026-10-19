@@ -1,5 +1,11 @@
 import { Request, Response, NextFunction } from "express";
 import prisma from "../lib/prisma";
+import {
+  createApplicationForUser,
+  getMyApplications as getMyApplicationsDal,
+  getMyArtisanProfile as getMyArtisanProfileDal,
+  updateMyArtisanProfile,
+} from "../dal/artisanProfile";
 
 // GET /api/artisans/applications/mine — Cek status pengajuan konsinyasi milik user yang login (Daftarkan sebelum /:id)
 export const getMyApplications = async (req: Request, res: Response, next: NextFunction) => {
@@ -8,11 +14,7 @@ export const getMyApplications = async (req: Request, res: Response, next: NextF
       return res.status(401).json({ error: "Belum login" });
     }
 
-    const applications = await prisma.artisanApplication.findMany({
-      where: { userId: req.user.id },
-      orderBy: { submittedAt: "desc" },
-      include: { category: true },
-    });
+    const applications = await getMyApplicationsDal(req.user);
     res.json({ applications });
   } catch (err) {
     next(err);
@@ -26,20 +28,7 @@ export const updateMyProfile = async (req: Request, res: Response, next: NextFun
       return res.status(401).json({ error: "Belum login" });
     }
 
-    const artisan = await prisma.artisan.findUnique({ where: { userId: req.user.id } });
-    if (!artisan) {
-      return res.status(404).json({ error: "Profil kreator tidak ditemukan" });
-    }
-
-    const { brandName, bio, avatarUrl } = req.body;
-    const updated = await prisma.artisan.update({
-      where: { id: artisan.id },
-      data: {
-        ...(brandName && { brandName }),
-        ...(bio !== undefined && { bio }),
-        ...(avatarUrl !== undefined && { avatarUrl }),
-      },
-    });
+    const updated = await updateMyArtisanProfile(req.user, req.body);
 
     res.json({ message: "Profil kreator berhasil diperbarui", artisan: updated });
   } catch (err) {
@@ -54,37 +43,10 @@ export const getMyArtisanProfile = async (req: Request, res: Response, next: Nex
       return res.status(401).json({ error: "Belum login" });
     }
 
-    const artisan = await prisma.artisan.findUnique({
-      where: { userId: req.user.id },
-      include: {
-        products: {
-          include: { category: true, variants: true, story: true },
-        },
-      },
-    });
-
-    if (!artisan) {
-      return res.status(404).json({ error: "Profil kreator tidak ditemukan" });
-    }
-
-    const reviews = await prisma.review.findMany({
-      where: {
-        status: "tampil",
-        product: { artisanId: artisan.id },
-      },
-      select: { rating: true },
-    });
-
-    const avgRating = reviews.length > 0
-      ? Number((reviews.reduce((acc, r) => acc + r.rating, 0) / reviews.length).toFixed(1))
-      : 0;
+    const artisan = await getMyArtisanProfileDal(req.user);
 
     res.json({
-      artisan: {
-        ...artisan,
-        productCount: artisan.products.length,
-        avgRating,
-      },
+      artisan,
     });
   } catch (err) {
     next(err);
@@ -191,40 +153,14 @@ export const applyConsignment = async (req: Request, res: Response, next: NextFu
         error: "applicantName, contact, brandName, dan description wajib diisi",
       });
     }
-    if (samplePhotos !== undefined && (!Array.isArray(samplePhotos) || samplePhotos.some((photo) => typeof photo !== "string"))) {
-      return res.status(400).json({ error: "samplePhotos harus berupa array URL" });
-    }
-
-    // F-19: Hanya buyer yang boleh mengajukan konsinyasi
-    if (req.user.role !== "buyer") {
-      return res.status(403).json({
-        error: "Hanya pengguna dengan role buyer yang dapat mengajukan konsinyasi",
-      });
-    }
-
-    // Cek jika user sudah punya pengajuan yang masih status pending
-    const existingPending = await prisma.artisanApplication.findFirst({
-      where: { userId: req.user.id, status: "pending" },
-    });
-
-    if (existingPending) {
-      return res.status(400).json({
-        error: "Kamu masih memiliki pengajuan konsinyasi yang sedang diproses (pending)",
-      });
-    }
-
-    const application = await prisma.artisanApplication.create({
-      data: {
-        userId: req.user.id,
-        applicantName,
-        contact,
-        brandName,
-        categoryId,
-        description,
-        sampleFileUrl: samplePhotos?.[0] || sampleFileUrl,
-        samplePhotos: samplePhotos === undefined ? undefined : samplePhotos,
-        status: "pending",
-      },
+    const application = await createApplicationForUser(req.user, {
+      applicantName,
+      contact,
+      brandName,
+      categoryId,
+      description,
+      sampleFileUrl,
+      samplePhotos,
     });
 
     res.status(201).json({ application });

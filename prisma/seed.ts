@@ -121,6 +121,55 @@ async function main() {
   }
   console.log("✅ Akun Admin, Buyer, dan 3 Kreator berhasil disiapkan.");
 
+  // 2b. AKUN DEMO PENILAIAN (terpisah dari akun operasional di atas)
+  const demoRawPassword = process.env.SEED_DEMO_PASSWORD;
+  if (!demoRawPassword) {
+    console.warn("Seed akun demo dilewati: SEED_DEMO_PASSWORD belum diisi.");
+  } else {
+    const demoPassword = await bcrypt.hash(demoRawPassword, 10);
+    const demoAdminEmail = process.env.SEED_DEMO_ADMIN_EMAIL || "demo.admin@sesuatu.test";
+    const demoCreatorEmail = process.env.SEED_DEMO_CREATOR_EMAIL || "demo.creator@sesuatu.test";
+    const demoBuyerEmail = process.env.SEED_DEMO_BUYER_EMAIL || "demo.buyer@sesuatu.test";
+
+    await prisma.user.upsert({
+      where: { email: demoAdminEmail },
+      update: {},
+      create: { name: "Demo Admin", email: demoAdminEmail, passwordHash: demoPassword, role: "admin", authProvider: "email" },
+    });
+    const demoCreator = await prisma.user.upsert({
+      where: { email: demoCreatorEmail },
+      update: {},
+      create: { name: "Demo Creator", email: demoCreatorEmail, passwordHash: demoPassword, role: "creator", authProvider: "email" },
+    });
+    await prisma.user.upsert({
+      where: { email: demoBuyerEmail },
+      update: {},
+      create: { name: "Demo Buyer", email: demoBuyerEmail, passwordHash: demoPassword, role: "buyer", authProvider: "email" },
+    });
+
+    const demoArtisan = await prisma.artisan.upsert({
+      where: { userId: demoCreator.id },
+      update: {},
+      create: { userId: demoCreator.id, brandName: "Demo Creator Store", bio: "Profil kreator untuk penilaian.", status: "aktif" },
+    });
+    await prisma.product.upsert({
+      where: { slug: "demo-produk-penilaian" },
+      update: {},
+      create: {
+        artisanId: demoArtisan.id,
+        categoryId: categories["postcard"].id,
+        name: "Demo Produk Penilaian",
+        slug: "demo-produk-penilaian",
+        shortDescription: "Produk demo untuk penilaian backend.",
+        description: "Produk demo yang dibuat oleh seeder untuk kebutuhan penilaian.",
+        price: 10000,
+        images: ["https://picsum.photos/seed/demo-product/600/600"],
+        variants: { create: { combination: [], stock: 10 } },
+      },
+    });
+    console.log("Akun demo penilaian berhasil disiapkan.");
+  }
+
   // 3. PRODUK & VARIAN (Minimal 8 Produk)
   const productsData = [
     {

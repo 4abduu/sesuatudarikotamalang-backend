@@ -6,7 +6,9 @@ import { OAuth2Client } from "google-auth-library";
 import prisma from "../lib/prisma";
 import { validatePassword } from "../lib/validatePassword";
 import { sendOtpEmail } from "../lib/mailer";
-import { isOwnCloudinaryImageUrl } from "../lib/cloudinary";
+import { isAllowedAvatarUrl } from "../lib/avatar";
+import { isEmail, isPasswordWithinBcryptLimit, isString } from "../lib/validate";
+import { generateOtp, hashOtp, verifyOtpHash } from "../lib/otp";
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
@@ -19,8 +21,11 @@ function issueToken(userId: string, role: string): string {
 export const register = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { name, email, password } = req.body;
-    if (!name || !email || !password) {
+    if (!isString(name, { min: 2, max: 80 }) || !isEmail(email) || !isString(password) || !password) {
       return res.status(400).json({ error: "name, email, password wajib diisi" });
+    }
+    if (Buffer.byteLength(password, "utf8") > 72) {
+      return res.status(400).json({ error: "Password maksimal 72 byte" });
     }
 
     // Validasi kekuatan password
@@ -38,9 +43,13 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
-    const user = await prisma.user.create({
-      data: { name, email, passwordHash, role: "buyer" },
-    });
+    let user;
+    try {
+      user = await prisma.user.create({ data: { name, email, passwordHash, role: "buyer" } });
+    } catch (err: any) {
+      if (err?.code === "P2002") return res.status(409).json({ error: "Email sudah terdaftar" });
+      throw err;
+    }
 
     const token = jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET || "", {
       expiresIn: "7d",
@@ -59,7 +68,7 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
 export const login = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { email, password } = req.body;
-    if (!email || !password) {
+    if (!isString(email) || !isString(password) || !email || !password) {
       return res.status(400).json({ error: "email dan password wajib diisi" });
     }
 
@@ -180,7 +189,7 @@ export const forgotPasswordRequest = async (req: Request, res: Response, next: N
       return res.status(404).json({ error: "Email tidak ditemukan" });
     }
 
-    const code = crypto.randomInt(100000, 1000000).toString();
+    const code = generateOtp();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 menit
 
     // Invalidasi OTP lama dengan purpose yang sama
@@ -192,7 +201,7 @@ export const forgotPasswordRequest = async (req: Request, res: Response, next: N
     await prisma.otpCode.create({
       data: {
         userId: user.id,
-        code,
+        code: hashOtp(code),
         purpose: "lupa_password",
         expiresAt,
       },
@@ -229,6 +238,9 @@ export const forgotPasswordVerify = async (req: Request, res: Response, next: Ne
     }
 
     const { valid, checks } = validatePassword(newPassword);
+    if (!isPasswordWithinBcryptLimit(newPassword)) {
+      return res.status(400).json({ error: "Password maksimal 72 byte" });
+    }
     if (!valid) {
       return res.status(400).json({
         error: "Password baru tidak memenuhi kriteria keamanan",
@@ -239,7 +251,6 @@ export const forgotPasswordVerify = async (req: Request, res: Response, next: Ne
     const otpRecord = await prisma.otpCode.findFirst({
       where: {
         userId: user.id,
-        code,
         purpose: "lupa_password",
         isUsed: false,
         expiresAt: { gt: new Date() },
@@ -248,6 +259,14 @@ export const forgotPasswordVerify = async (req: Request, res: Response, next: Ne
     });
 
     if (!otpRecord) {
+      return res.status(400).json({ error: "Kode OTP tidak valid atau sudah kedaluwarsa" });
+    }
+    if (!verifyOtpHash(code, otpRecord.code)) {
+      const attempts = otpRecord.attempts + 1;
+      await prisma.otpCode.update({
+        where: { id: otpRecord.id },
+        data: { attempts, ...(attempts >= 5 ? { isUsed: true } : {}) },
+      });
       return res.status(400).json({ error: "Kode OTP tidak valid atau sudah kedaluwarsa" });
     }
 
@@ -307,7 +326,7 @@ export const changeEmailRequest = async (req: Request, res: Response, next: Next
       return res.status(409).json({ error: "Email baru sudah digunakan oleh akun lain" });
     }
 
-    const code = crypto.randomInt(100000, 1000000).toString();
+    const code = generateOtp();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
     // Invalidasi OTP lama dengan purpose yang sama
@@ -319,7 +338,7 @@ export const changeEmailRequest = async (req: Request, res: Response, next: Next
     await prisma.otpCode.create({
       data: {
         userId: req.user.id,
-        code,
+        code: hashOtp(code),
         purpose: "ganti_email",
         targetEmail: newEmail,
         expiresAt,
@@ -354,7 +373,6 @@ export const changeEmailVerify = async (req: Request, res: Response, next: NextF
     const otpRecord = await prisma.otpCode.findFirst({
       where: {
         userId: req.user.id,
-        code,
         purpose: "ganti_email",
         isUsed: false,
         expiresAt: { gt: new Date() },
@@ -363,6 +381,14 @@ export const changeEmailVerify = async (req: Request, res: Response, next: NextF
     });
 
     if (!otpRecord || !otpRecord.targetEmail) {
+      return res.status(400).json({ error: "Kode OTP tidak valid atau sudah kedaluwarsa" });
+    }
+    if (!verifyOtpHash(code, otpRecord.code)) {
+      const attempts = otpRecord.attempts + 1;
+      await prisma.otpCode.update({
+        where: { id: otpRecord.id },
+        data: { attempts, ...(attempts >= 5 ? { isUsed: true } : {}) },
+      });
       return res.status(400).json({ error: "Kode OTP tidak valid atau sudah kedaluwarsa" });
     }
 
@@ -410,7 +436,7 @@ export const changePassword = async (req: Request, res: Response, next: NextFunc
     }
 
     const { oldPassword, newPassword } = req.body;
-    if (!oldPassword || !newPassword) {
+    if (!isString(oldPassword) || !isString(newPassword) || !oldPassword || !newPassword) {
       return res.status(400).json({ error: "oldPassword dan newPassword wajib diisi" });
     }
 
@@ -431,6 +457,9 @@ export const changePassword = async (req: Request, res: Response, next: NextFunc
     }
 
     const { valid, checks } = validatePassword(newPassword);
+    if (!isPasswordWithinBcryptLimit(newPassword)) {
+      return res.status(400).json({ error: "Password maksimal 72 byte" });
+    }
     if (!valid) {
       return res.status(400).json({
         error: "Password baru tidak memenuhi kriteria keamanan",
@@ -448,6 +477,35 @@ export const changePassword = async (req: Request, res: Response, next: NextFunc
     // D1: kembalikan token baru agar sesi yang sedang berjalan tidak terputus
     const newToken = issueToken(user.id, user.role);
     res.json({ message: "Password berhasil diperbarui", token: newToken });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// POST /api/auth/logout (butuh requireAuth) — Cabut token yang sedang dipakai saja
+export const logout = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: "Belum login", code: "UNAUTHORIZED" });
+    const header = req.headers.authorization;
+    const token = header?.startsWith("Bearer ") ? header.slice(7) : "";
+    const decoded = jwt.decode(token) as { exp?: number } | null;
+    if (!token || !decoded?.exp) {
+      return res.status(400).json({ error: "Token tidak valid" });
+    }
+
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+    try {
+      await prisma.revokedToken.create({
+        data: {
+          tokenHash,
+          userId: req.user.id,
+          expiresAt: new Date(decoded.exp * 1000),
+        },
+      });
+    } catch (error: any) {
+      if (error?.code !== "P2002") throw error;
+    }
+    res.json({ message: "Logout berhasil" });
   } catch (err) {
     next(err);
   }
@@ -514,15 +572,7 @@ export const updateProfile = async (req: Request, res: Response, next: NextFunct
         }
 
         // Tentukan base URL upload yang valid
-        const publicBase = process.env.PUBLIC_BASE_URL ? process.env.PUBLIC_BASE_URL.replace(/\/+$/, "") : "";
-        const reqBase = `${req.protocol}://${req.get("host")}`;
-
-        const isValidLocal =
-          (publicBase && trimmedAvatar.startsWith(`${publicBase}/uploads/`)) ||
-          trimmedAvatar.startsWith(`${reqBase}/uploads/`) ||
-          trimmedAvatar.startsWith("/uploads/");
-
-        if (!isValidLocal && !isOwnCloudinaryImageUrl(trimmedAvatar)) {
+        if (!isAllowedAvatarUrl(trimmedAvatar, req)) {
           return res.status(400).json({ error: "avatarUrl harus merupakan URL hasil upload" });
         }
 
@@ -559,6 +609,7 @@ export default {
   changeEmailRequest,
   changeEmailVerify,
   changePassword,
+  logout,
   getMe,
   updateProfile,
 };

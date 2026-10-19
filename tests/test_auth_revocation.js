@@ -20,6 +20,7 @@ const {
   changeEmailVerify,
 } = require("../dist/controllers/authController");
 const mailerMod = require("../dist/lib/mailer");
+const { hashOtp } = require("../dist/lib/otp");
 
 const SECRET = process.env.JWT_SECRET || "secret-khusus-tes";
 const TAG = Date.now();
@@ -162,7 +163,7 @@ function assert(cond, msg) { if (!cond) throw new Error(msg || "assertion gagal"
     const code = "123456";
     await prisma.otpCode.create({
       data: {
-        userId: userB.id, code, purpose: "lupa_password", isUsed: false,
+        userId: userB.id, code: hashOtp(code), purpose: "lupa_password", isUsed: false,
         expiresAt: new Date(Date.now() + 600000),
       },
     });
@@ -184,7 +185,7 @@ function assert(cond, msg) { if (!cond) throw new Error(msg || "assertion gagal"
     const newEmail = `revc-new-${TAG}@test.local`;
     await prisma.otpCode.create({
       data: {
-        userId: userC.id, code, purpose: "ganti_email", isUsed: false,
+        userId: userC.id, code: hashOtp(code), purpose: "ganti_email", isUsed: false,
         targetEmail: newEmail, expiresAt: new Date(Date.now() + 600000),
       },
     });

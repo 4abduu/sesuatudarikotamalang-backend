@@ -329,11 +329,11 @@ async function runTests() {
     },
   });
 
-  // 5.1 User lain (creatorUserA) mencoba bayar order buyerUser -> 403
+  // 5.1 User lain (creatorUserA) mencoba bayar order buyerUser -> 404 (resource tidak dibocorkan)
   {
     const { req, res, next, result } = mockReqRes({}, creatorUserA, { id: orderMidtrans.id });
     await repayOrder(req, res, next);
-    assert("5.1 User bukan pemilik dibalas 403", result().statusCode === 403);
+    assert("5.1 User bukan pemilik dibalas 404", result().statusCode === 404);
   }
 
   // 5.2 Order COD mencoba diproses lewat /orders/:id/pay -> 400
