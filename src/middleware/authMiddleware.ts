@@ -3,6 +3,17 @@ import jwt from "jsonwebtoken";
 import prisma from "../lib/prisma";
 import crypto from "crypto";
 
+/**
+ * Ekstrak raw token dari header Authorization.
+ * Menerima "Bearer <token>" (case-insensitive, spasi ganda ditoleransi).
+ * Mengembalikan token string atau null bila format tidak sesuai.
+ */
+export function extractBearerToken(header?: string): string | null {
+  if (!header) return null;
+  const match = /^Bearer\s+(\S+)\s*$/i.exec(header);
+  return match ? match[1] : null;
+}
+
 export interface JwtPayload {
   id: string;
   role?: string;
@@ -16,11 +27,10 @@ export interface JwtPayload {
  */
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   const header = req.headers.authorization;
-  if (!header || !header.startsWith("Bearer ")) {
+  const token = extractBearerToken(header);
+  if (!token) {
     return res.status(401).json({ error: "Token tidak ditemukan", code: "UNAUTHORIZED" });
   }
-
-  const token = header.split(" ")[1];
   let payload: JwtPayload;
 
   try {

@@ -10,7 +10,7 @@ export const apiLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => req.path === "/payments/webhook",
-  message: { error: "Terlalu banyak permintaan. Silakan coba lagi nanti." },
+  message: { error: "Terlalu banyak permintaan. Silakan coba lagi nanti.", code: "RATE_LIMITED" },
 });
 
 /**
@@ -24,6 +24,7 @@ export const loginLimiter = rateLimit({
   legacyHeaders: false,
   message: {
     error: "Terlalu banyak percobaan login. Silakan coba lagi setelah 15 menit.",
+    code: "RATE_LIMITED",
   },
 });
 
@@ -38,6 +39,7 @@ export const otpRequestLimiter = rateLimit({
   legacyHeaders: false,
   message: {
     error: "Terlalu banyak permintaan OTP. Silakan coba lagi setelah 15 menit.",
+    code: "RATE_LIMITED",
   },
 });
 
@@ -52,6 +54,7 @@ export const otpVerifyLimiter = rateLimit({
   legacyHeaders: false,
   message: {
     error: "Terlalu banyak percobaan verifikasi OTP. Silakan minta kode baru.",
+    code: "RATE_LIMITED",
   },
 });
 
@@ -66,6 +69,7 @@ export const registerLimiter = rateLimit({
   legacyHeaders: false,
   message: {
     error: "Terlalu banyak percobaan registrasi. Silakan coba lagi nanti.",
+    code: "RATE_LIMITED",
   },
 });
 
@@ -75,7 +79,7 @@ export const googleLoginLimiter = rateLimit({
   max: 20,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: "Terlalu banyak percobaan Google login. Silakan coba lagi nanti." },
+  message: { error: "Terlalu banyak percobaan Google login. Silakan coba lagi nanti.", code: "RATE_LIMITED" },
 });
 
 /** Pencarian publik: maksimal 60 request per IP per menit. */
@@ -84,7 +88,7 @@ export const searchLimiter = rateLimit({
   max: 60,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: "Terlalu banyak permintaan pencarian. Silakan coba lagi nanti." },
+  message: { error: "Terlalu banyak permintaan pencarian. Silakan coba lagi nanti.", code: "RATE_LIMITED" },
 });
 
 /** Ganti password: maksimal 5 request per user per 15 menit. */
@@ -94,7 +98,7 @@ export const changePasswordLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => req.user?.id ? `user:${req.user.id}` : `ip:${ipKeyGenerator(req.ip || "")}`,
-  message: { error: "Terlalu banyak percobaan ganti password. Silakan coba lagi nanti." },
+  message: { error: "Terlalu banyak percobaan ganti password. Silakan coba lagi nanti.", code: "RATE_LIMITED" },
 });
 
 /** Upload: maksimal 30 request per user per jam. */
@@ -104,7 +108,7 @@ export const uploadLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => req.user?.id ? `user:${req.user.id}` : `ip:${ipKeyGenerator(req.ip || "")}`,
-  message: { error: "Terlalu banyak upload. Silakan coba lagi nanti." },
+  message: { error: "Terlalu banyak upload. Silakan coba lagi nanti.", code: "RATE_LIMITED" },
 });
 
 export default {

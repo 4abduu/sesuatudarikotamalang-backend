@@ -9,6 +9,7 @@ import { sendOtpEmail } from "../lib/mailer";
 import { isAllowedAvatarUrl } from "../lib/avatar";
 import { isEmail, isPasswordWithinBcryptLimit, isString } from "../lib/validate";
 import { generateOtp, hashOtp, verifyOtpHash } from "../lib/otp";
+import { extractBearerToken } from "../middleware/authMiddleware";
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
@@ -262,11 +263,18 @@ export const forgotPasswordVerify = async (req: Request, res: Response, next: Ne
       return res.status(400).json({ error: "Kode OTP tidak valid atau sudah kedaluwarsa" });
     }
     if (!verifyOtpHash(code, otpRecord.code)) {
-      const attempts = otpRecord.attempts + 1;
-      await prisma.otpCode.update({
+      // 1a: increment atomik agar tidak ada race condition pada percobaan paralel
+      const { attempts } = await prisma.otpCode.update({
         where: { id: otpRecord.id },
-        data: { attempts, ...(attempts >= 5 ? { isUsed: true } : {}) },
+        data: {
+          attempts: { increment: 1 },
+          ...(otpRecord.attempts + 1 >= 5 ? { isUsed: true } : {}),
+        },
+        select: { attempts: true },
       });
+      if (attempts >= 5) {
+        await prisma.otpCode.update({ where: { id: otpRecord.id }, data: { isUsed: true } });
+      }
       return res.status(400).json({ error: "Kode OTP tidak valid atau sudah kedaluwarsa" });
     }
 
@@ -384,11 +392,18 @@ export const changeEmailVerify = async (req: Request, res: Response, next: NextF
       return res.status(400).json({ error: "Kode OTP tidak valid atau sudah kedaluwarsa" });
     }
     if (!verifyOtpHash(code, otpRecord.code)) {
-      const attempts = otpRecord.attempts + 1;
-      await prisma.otpCode.update({
+      // 1a: increment atomik agar tidak ada race condition pada percobaan paralel
+      const { attempts } = await prisma.otpCode.update({
         where: { id: otpRecord.id },
-        data: { attempts, ...(attempts >= 5 ? { isUsed: true } : {}) },
+        data: {
+          attempts: { increment: 1 },
+          ...(otpRecord.attempts + 1 >= 5 ? { isUsed: true } : {}),
+        },
+        select: { attempts: true },
       });
+      if (attempts >= 5) {
+        await prisma.otpCode.update({ where: { id: otpRecord.id }, data: { isUsed: true } });
+      }
       return res.status(400).json({ error: "Kode OTP tidak valid atau sudah kedaluwarsa" });
     }
 
@@ -487,8 +502,8 @@ export const logout = async (req: Request, res: Response, next: NextFunction) =>
   try {
     if (!req.user) return res.status(401).json({ error: "Belum login", code: "UNAUTHORIZED" });
     const header = req.headers.authorization;
-    const token = header?.startsWith("Bearer ") ? header.slice(7) : "";
-    const decoded = jwt.decode(token) as { exp?: number } | null;
+    const token = extractBearerToken(header);
+    const decoded = token ? jwt.decode(token) as { exp?: number } | null : null;
     if (!token || !decoded?.exp) {
       return res.status(400).json({ error: "Token tidak valid" });
     }

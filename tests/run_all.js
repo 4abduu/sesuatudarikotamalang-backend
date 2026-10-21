@@ -56,6 +56,7 @@ const suites = [
   "test_stock_batch.js",                 // Langkah 4g: stok batch
   "test_logout.js",                      // Langkah 5: logout dan denylist
   "test_otp_hardening.js",               // Langkah 5: pengerasan OTP
+  "test_langkah1_fixes.js",              // Langkah 1: OTP atomik, P2002 review, token ekstraksi, null field, RATE_LIMITED
   // TIDAK dimasukkan: test_ai_integration.js (butuh server live + Gemini sungguhan)
   // TIDAK dimasukkan: test-cloudinary.js (butuh jaringan + kredensial Cloudinary)
 ];

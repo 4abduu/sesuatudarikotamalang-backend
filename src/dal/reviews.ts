@@ -45,17 +45,26 @@ export async function createReviewForUser(
   }
 
   const trimmedComment = comment.trim();
-  const review = await prisma.review.create({
-    data: {
-      userId: user.id,
-      productId,
-      orderItemId: typeof orderItemId === "string" && orderItemId ? orderItemId : null,
-      rating: numericRating,
-      comment: trimmedComment,
-      status: "tampil",
-    },
-    include: { user: { select: { id: true, name: true, avatarUrl: true } }, product: { include: { artisan: true } } },
-  });
+  let review;
+  try {
+    review = await prisma.review.create({
+      data: {
+        userId: user.id,
+        productId,
+        orderItemId: typeof orderItemId === "string" && orderItemId ? orderItemId : null,
+        rating: numericRating,
+        comment: trimmedComment,
+        status: "tampil",
+      },
+      include: { user: { select: { id: true, name: true, avatarUrl: true } }, product: { include: { artisan: true } } },
+    });
+  } catch (createErr: any) {
+    // 1b: P2002 dapat terjadi saat dua request paralel membuat ulasan untuk item yang sama
+    if (createErr?.code === "P2002") {
+      throw badRequest("Kamu sudah memberikan ulasan untuk item pesanan ini");
+    }
+    throw createErr;
+  }
 
   if (review.product?.artisan?.userId && review.product.artisan.userId !== user.id) {
     await prisma.notification.create({

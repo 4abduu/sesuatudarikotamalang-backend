@@ -81,9 +81,11 @@ export const search = async (req: Request, res: Response, next: NextFunction) =>
     // F-25: Lampirkan effectiveStock ke tiap varian produk di pencarian + rating info
     const allVariants = products.flatMap((product) => product.variants);
     const allVariantsWithStock = await attachEffectiveStockToVariants(allVariants);
+    // 1e: ganti filter+some O(n²) dengan Map berdasarkan variantId
+    const variantStockMap = new Map(allVariantsWithStock.map((v) => [v.id, v]));
     const productsWithStock = products.map((p) => {
       const stats = ratingMap[p.id] || { avgRating: 0, reviewCount: 0 };
-      const variants = allVariantsWithStock.filter((variant) => p.variants.some((item) => item.id === variant.id));
+      const variants = p.variants.map((v) => variantStockMap.get(v.id)!).filter(Boolean);
       return { ...p, avgRating: stats.avgRating, reviewCount: stats.reviewCount, variants };
     });
 

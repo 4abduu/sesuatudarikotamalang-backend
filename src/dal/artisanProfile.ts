@@ -30,7 +30,8 @@ export async function updateMyArtisanProfile(user: AuthUser, input: { brandName?
   if (bio !== undefined && !isString(bio, { max: 2000 })) {
     throw badRequest("bio harus berupa string maksimal 2000 karakter");
   }
-  if (avatarUrl !== undefined && (typeof avatarUrl !== "string" || avatarUrl.length > 191 || !isAllowedAvatarUrl(avatarUrl))) {
+  // 1d: avatarUrl nullable di schema — null menghapus nilai, string divalidasi, undefined tidak mengubah
+  if (avatarUrl !== undefined && avatarUrl !== null && (typeof avatarUrl !== "string" || avatarUrl.length > 191 || !isAllowedAvatarUrl(avatarUrl))) {
     throw badRequest("avatarUrl harus merupakan URL hasil upload");
   }
   return prisma.artisan.update({

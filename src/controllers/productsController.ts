@@ -123,9 +123,11 @@ export const listProducts = async (req: Request, res: Response, next: NextFuncti
     // Lampirkan effectiveStock ke tiap varian + rating info
     const allVariants = products.flatMap((product) => product.variants);
     const allVariantsWithStock = await attachEffectiveStockToVariants(allVariants);
+    // 1e: ganti filter+some O(n²) dengan Map berdasarkan variantId
+    const variantStockMap = new Map(allVariantsWithStock.map((v) => [v.id, v]));
     const variantsByProduct = new Map<string, typeof allVariantsWithStock>();
     for (const product of products) {
-      variantsByProduct.set(product.id, allVariantsWithStock.filter((variant) => product.variants.some((item) => item.id === variant.id)));
+      variantsByProduct.set(product.id, product.variants.map((v) => variantStockMap.get(v.id)!).filter(Boolean));
     }
     const productsWithStock = products.map((p) => {
       const stats = ratingMap[p.id] || { avgRating: 0, reviewCount: 0 };
@@ -416,7 +418,8 @@ export const updateProduct = async (req: Request, res: Response, next: NextFunct
     if (name !== undefined && (!isString(name, { max: 191 }) || !name.trim())) {
       return res.status(400).json({ error: "name harus berupa teks maksimal 191 karakter" });
     }
-    if (shortDescription !== undefined && !isString(shortDescription, { max: 191 })) {
+    // 1d: shortDescription nullable di schema — null menghapus nilai, string divalidasi, undefined tidak mengubah
+    if (shortDescription !== undefined && shortDescription !== null && !isString(shortDescription, { max: 191 })) {
       return res.status(400).json({ error: "shortDescription harus berupa string maksimal 191 karakter" });
     }
     if (description !== undefined && !isString(description)) {
