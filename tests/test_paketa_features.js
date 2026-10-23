@@ -89,7 +89,7 @@ async function runTests() {
   await prisma.appSettings.upsert({
     where: { id: 1 },
     update: { autoCancelEnabled: true },
-    create: { id: 1, autoCancelEnabled: true, holdDurationMinutes: 120 },
+    create: { id: 1, autoCancelEnabled: true, holdDurationMinutes: 1440 },
   });
 
   // Setup Users: Buyer, Creator A, Creator B, Admin

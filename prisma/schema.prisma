@@ -55,6 +55,22 @@ enum OrderStatus {
   lewat_batas_pengambilan // khusus alur Midtrans yang lewat pickupDeadline
 }
 
+// Status refund untuk pesanan yang sudah dibayar online (Midtrans). Refund dilakukan
+// MANUAL oleh admin lewat WhatsApp; sistem hanya mencatat status. Pesanan Cash/QRIS
+// atau yang belum dibayar selalu tidak_ada.
+enum RefundStatus {
+  tidak_ada
+  menunggu
+  selesai
+}
+
+// Alasan pembatalan pesanan yang sudah dibayar online.
+// permintaan_pembeli hanya boleh dalam batas waktu refund; kesalahan_toko selalu boleh.
+enum CancelReason {
+  permintaan_pembeli
+  kesalahan_toko
+}
+
 enum OtpPurpose {
   ganti_email
   lupa_password
@@ -145,11 +161,16 @@ model Artisan {
   bio       String?       @db.Text
   avatarUrl String?
   status    ArtisanStatus @default(aktif)
+  // true = baris "Official Store" (tanpa akun login, userId kosong, dikelola admin).
+  // Hanya boleh ada SATU baris official; aturan itu dijaga di aplikasi (Langkah 3),
+  // karena MySQL tidak punya unique index parsial.
+  isOfficial Boolean      @default(false)
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
 
   products Product[]
 
+  @@index([isOfficial])
   @@map("artisans")
 }
 
@@ -305,6 +326,11 @@ model Order {
   // Khusus paymentMethod = midtrans (lunas langsung)
   pickupDeadline DateTime? // createdAt/pickupDate + AppSettings.pickupDeadlineDays
 
+  // Refund manual (lewat WhatsApp admin). Hanya relevan untuk pesanan yang sudah dibayar online.
+  refundStatus RefundStatus @default(tidak_ada)
+  refundedAt   DateTime?
+  cancelReason CancelReason?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -313,6 +339,7 @@ model Order {
 
   @@index([userId])
   @@index([status])
+  @@index([refundStatus])
   @@map("orders")
 }
 
@@ -395,9 +422,10 @@ model Notification {
 
 model AppSettings {
   id                  Int      @id @default(1)
-  holdDurationMinutes Int      @default(120) // default 2 jam, khusus Cash/QRIS
+  holdDurationMinutes Int      @default(1440) // default 1 hari, khusus Cash/QRIS (rentang valid 15-1440)
   autoCancelEnabled   Boolean  @default(true)
   pickupDeadlineDays  Int      @default(14) // opsi yang divalidasi di aplikasi: 7 / 14 / 30
+  refundWindowDays    Int      @default(3)  // batas waktu refund permintaan pembeli; opsi di aplikasi: 1 / 3 / 7
   whatsappAdminNumber String?
   notificationEmail   String?
   updatedAt           DateTime @updatedAt

@@ -6,6 +6,9 @@ import { attachEffectiveStockToVariants } from "../lib/stock";
 import { getEditableProduct } from "../dal/productOwnership";
 import { isHttpsUrl, isString } from "../lib/validate";
 import { shouldCountView } from "../lib/viewDedupe";
+import { HttpError } from "../lib/httpError";
+import { badRequest, notFound } from "../dal/errors";
+import { getOfficialArtisan } from "../lib/officialStore";
 
 // Helper untuk membuat slug sederhana dari nama produk
 function createSlug(name: string): string {
@@ -269,17 +272,30 @@ export const createProduct = async (req: Request, res: Response, next: NextFunct
       return res.status(404).json({ error: "Kategori tidak ditemukan" });
     }
 
-    // Cari artisanId pengunggah
+    // Cari artisanId penjual produk
     let artisanId: string;
     if (req.user.role === "admin") {
-      if (!req.body.artisanId) {
-        return res.status(400).json({ error: "artisanId wajib diisi oleh Admin saat menambahkan produk" });
+      const rawArtisanId = req.body.artisanId;
+      if (rawArtisanId === undefined || rawArtisanId === null || rawArtisanId === "") {
+        // Tidak memilih penjual: produk dijual atas nama Official Store
+        const official = await getOfficialArtisan();
+        if (!official) {
+          throw new HttpError(
+            409,
+            "Official Store belum dibuat. Jalankan: npm run prisma:seed:official",
+            "OFFICIAL_STORE_MISSING"
+          );
+        }
+        artisanId = official.id;
+      } else {
+        if (typeof rawArtisanId !== "string") {
+          throw badRequest("artisanId harus berupa string");
+        }
+        const existingArtisan = await prisma.artisan.findUnique({ where: { id: rawArtisanId } });
+        if (!existingArtisan) throw notFound("Kreator tidak ditemukan");
+        if (existingArtisan.status !== "aktif") throw badRequest("Kreator tidak aktif");
+        artisanId = existingArtisan.id;
       }
-      const existingArtisan = await prisma.artisan.findUnique({ where: { id: req.body.artisanId } });
-      if (!existingArtisan) {
-        return res.status(404).json({ error: "Profil kreator (artisanId) tidak ditemukan" });
-      }
-      artisanId = req.body.artisanId;
     } else {
       // Creator: cari artisan yang terikat dengan userId ini
       const artisan = await prisma.artisan.findUnique({ where: { userId: req.user.id } });
@@ -378,6 +394,10 @@ export const createProduct = async (req: Request, res: Response, next: NextFunct
 
     res.status(201).json({ product: newProduct });
   } catch (err: any) {
+    // HttpError diteruskan ke error handler global agar field `code` ikut terkirim
+    if (err instanceof HttpError) {
+      return next(err);
+    }
     if (err.status) {
       return res.status(err.status).json({ error: err.message });
     }

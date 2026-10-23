@@ -95,7 +95,11 @@ export const listArtisans = async (req: Request, res: Response, next: NextFuncti
       };
     });
 
-    res.json({ artisans: artisansWithStats });
+    // Official Store tidak masuk daftar kreator; dikirim terpisah lewat field officialStore
+    res.json({
+      artisans: artisansWithStats.filter((a) => !a.isOfficial),
+      officialStore: artisansWithStats.find((a) => a.isOfficial) ?? null,
+    });
   } catch (err) {
     next(err);
   }

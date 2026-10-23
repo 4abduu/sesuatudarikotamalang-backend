@@ -7,6 +7,7 @@ import { getPickupSlots, getSlotCapacity } from "../lib/slots";
 import { isRetryableTransactionError } from "../lib/txRetry";
 import { toWibDateString, todayWibString } from "../lib/dates";
 import { cancelOrderForUser, getOrderForUser, listMyOrders } from "../dal/orders";
+import { computeRefund } from "../lib/refund";
 
 // GET /api/orders — Riwayat pesanan milik user yang sedang login
 export const listOrders = async (req: Request, res: Response, next: NextFunction) => {
@@ -32,8 +33,9 @@ export const getOrderById = async (req: Request, res: Response, next: NextFuncti
     const { id } = req.params;
 
     const order = await getOrderForUser(req.user, id);
+    const settings = await prisma.appSettings.findUnique({ where: { id: 1 } });
 
-    res.json({ order });
+    res.json({ order: { ...order, refund: computeRefund({ order: order as any, payment: (order as any).payment, settings }) } });
   } catch (err) {
     next(err);
   }
@@ -262,8 +264,8 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
       const isMidtrans = paymentMethod === "midtrans";
       const now = new Date();
 
-      // Durasi Hold (COD default 120 menit; Midtrans hold 60 menit agar tidak menahan stok tanpa batas)
-      const holdMinutes = isMidtrans ? 60 : (settings?.holdDurationMinutes || 120);
+      // Durasi Hold (COD default 1440 menit / 1 hari; Midtrans hold 60 menit agar tidak menahan stok tanpa batas)
+      const holdMinutes = isMidtrans ? 60 : (settings?.holdDurationMinutes || 1440);
       const holdExpiresAt = new Date(now.getTime() + holdMinutes * 60000);
 
       // Batas Pengambilan untuk Midtrans Lunas (Default 14 hari)

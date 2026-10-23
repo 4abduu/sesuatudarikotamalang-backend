@@ -1,11 +1,13 @@
 import prisma from "../lib/prisma";
+import { Prisma } from "@prisma/client";
 import { badRequest, forbidden, notFound } from "./errors";
 import { AuthUser } from "./types";
+import { isPaymentSuccess } from "../lib/paymentStatus";
 
 const orderInclude = {
   items: {
     include: {
-      product: { include: { artisan: { select: { id: true, brandName: true } } } },
+      product: { include: { artisan: { select: { id: true, brandName: true, isOfficial: true } } } },
       variant: true,
     },
   },
@@ -45,21 +47,66 @@ export async function cancelOrderForUser(user: AuthUser, id: string) {
     throw forbidden("Pesanan yang sudah lunas atau lewat batas pengambilan hanya bisa dibatalkan oleh Admin.");
   }
 
-  const where = user.role === "admin"
-    ? { id, status: { notIn: finalStatuses as any } }
-    : { id, userId: user.id, status: "menunggu_bayar" as const };
-  const result = await prisma.order.updateMany({ where: where as any, data: { status: "dibatalkan" } });
+  return prisma.$transaction(async (tx) => {
+    const lockedRows: Array<{ id: string }> = await tx.$queryRaw`SELECT id FROM orders WHERE id = ${id} FOR UPDATE`;
+    if (lockedRows.length === 0) throw notFound("Pesanan tidak ditemukan");
 
-  if (result.count === 0) {
-    const fresh = await getOrderForUser(user, id, {});
-    if (user.role !== "admin" && (fresh.status === "lunas" || fresh.status === "lewat_batas_pengambilan")) {
-      throw forbidden("Pesanan yang sudah lunas atau lewat batas pengambilan hanya bisa dibatalkan oleh Admin.");
+    const fresh = await tx.order.findUnique({
+      where: { id },
+      include: { payment: true, items: true },
+    });
+    if (!fresh || (user.role !== "admin" && fresh.userId !== user.id)) {
+      throw notFound("Pesanan tidak ditemukan");
     }
     if (finalStatuses.includes(fresh.status)) {
       throw badRequest(`Pesanan yang sudah berstatus ${fresh.status} tidak dapat dibatalkan`);
     }
-    throw badRequest("Pesanan tidak dapat dibatalkan");
+    if (user.role !== "admin" && (fresh.status === "lunas" || fresh.status === "lewat_batas_pengambilan")) {
+      throw forbidden("Pesanan yang sudah lunas atau lewat batas pengambilan hanya bisa dibatalkan oleh Admin.");
+    }
+    if (user.role !== "admin" && fresh.status !== "menunggu_bayar") {
+      throw badRequest("Pesanan tidak dapat dibatalkan");
+    }
+
+    return cancelOrderInTx(tx, fresh, {});
+  });
+}
+
+export async function cancelOrderInTx(
+  tx: Prisma.TransactionClient,
+  order: any,
+  options: { reason?: "permintaan_pembeli" | "kesalahan_toko" } = {},
+) {
+  const paid = order.paymentMethod === "midtrans" && isPaymentSuccess(order.payment?.status);
+  const cancelReason = paid ? (options.reason || "kesalahan_toko") : options.reason;
+  const updated = await tx.order.update({
+    where: { id: order.id },
+    data: {
+      status: "dibatalkan",
+      ...(cancelReason ? { cancelReason } : {}),
+      ...(paid ? { refundStatus: "menunggu" } : {}),
+    },
+  });
+
+  if (paid) {
+    await tx.notification.create({
+      data: {
+        userId: order.userId,
+        type: "pesanan_update",
+        title: "Pesanan Dibatalkan",
+        body: `Pesanan ${order.orderNumber} dibatalkan. Pembayaranmu sudah kami terima. Hubungi admin lewat WhatsApp untuk proses pengembalian dana.`,
+      },
+    });
+  } else {
+    await tx.notification.create({
+      data: {
+        userId: order.userId,
+        type: "pesanan_update",
+        title: "Update Status Pesanan",
+        body: `Pesanan kamu (${order.orderNumber}) telah diperbarui menjadi: dibatalkan.`,
+      },
+    });
   }
 
-  return prisma.order.findUnique({ where: { id } });
+  return updated;
 }

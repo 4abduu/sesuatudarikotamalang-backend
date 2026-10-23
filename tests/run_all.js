@@ -57,6 +57,12 @@ const suites = [
   "test_logout.js",                      // Langkah 5: logout dan denylist
   "test_otp_hardening.js",               // Langkah 5: pengerasan OTP
   "test_langkah1_fixes.js",              // Langkah 1: OTP atomik, P2002 review, token ekstraksi, null field, RATE_LIMITED
+  "test_settings_refund.js",             // Langkah 4: refundWindowDays validasi & hold default 1 hari
+  "test_official_store.js",              // Langkah 3: official store
+  "test_refund_policy.js",                // Langkah 5a: kebijakan refund murni
+  "test_refund_flow.js",                  // Langkah 5c-5g: alur refund admin
+  "test_refund_webhook.js",               // Langkah 5f: late settlement
+  "step2_schema_check.js"
   // TIDAK dimasukkan: test_ai_integration.js (butuh server live + Gemini sungguhan)
   // TIDAK dimasukkan: test-cloudinary.js (butuh jaringan + kredensial Cloudinary)
 ];

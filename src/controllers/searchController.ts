@@ -43,6 +43,7 @@ export const search = async (req: Request, res: Response, next: NextFunction) =>
       prisma.artisan.findMany({
         where: {
           status: "aktif",
+          isOfficial: false,
           OR: [
             { brandName: { contains: q } },
             { bio: { contains: q } },

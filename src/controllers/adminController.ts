@@ -1,6 +1,9 @@
 import { Request, Response, NextFunction } from "express";
 import prisma from "../lib/prisma";
 import { getPickupSlots, getSlotCapacity } from "../lib/slots";
+import { HttpError } from "../lib/httpError";
+import { computeRefund } from "../lib/refund";
+import { cancelOrderInTx } from "../dal/orders";
 
 // GET /api/admin/dashboard — ringkasan statcard + data grafik dashboard admin
 export const getDashboard = async (req: Request, res: Response, next: NextFunction) => {
@@ -29,6 +32,8 @@ export const getDashboard = async (req: Request, res: Response, next: NextFuncti
       recentPaidOrders,
       upcomingPickups,
       todaySlotOrders,
+      pendingRefundCount,
+      pendingRefundRows,
     ] = await Promise.all([
       // 1. Pesanan dengan jadwal pickup HARI INI saja
       prisma.order.count({
@@ -113,6 +118,21 @@ export const getDashboard = async (req: Request, res: Response, next: NextFuncti
         },
         _count: { _all: true },
       }),
+      prisma.order.count({ where: { refundStatus: "menunggu" } }),
+      prisma.order.findMany({
+        where: { refundStatus: "menunggu" },
+        orderBy: { updatedAt: "asc" },
+        take: 10,
+        select: {
+          id: true,
+          orderNumber: true,
+          totalAmount: true,
+          cancelReason: true,
+          updatedAt: true,
+          user: { select: { name: true } },
+          payment: { select: { paidAt: true } },
+        },
+      }),
     ]);
 
     const revenue7Days = recentPaidOrders.reduce((sum, o) => sum + o.totalAmount, 0);
@@ -153,6 +173,16 @@ export const getDashboard = async (req: Request, res: Response, next: NextFuncti
       booked: slotCountMap[time] || 0,
     }));
 
+    const pendingRefunds = pendingRefundRows.map((order) => ({
+      id: order.id,
+      orderNumber: order.orderNumber,
+      totalAmount: order.totalAmount,
+      buyerName: order.user.name,
+      paidAt: order.payment?.paidAt || null,
+      cancelReason: order.cancelReason,
+      updatedAt: order.updatedAt,
+    }));
+
     // Reshape lowStockVariants ke { id, name, variantLabel, stock }
     const lowStockProducts = lowStockVariants.map((v) => ({
       id: v.product.id,
@@ -175,6 +205,8 @@ export const getDashboard = async (req: Request, res: Response, next: NextFuncti
       topSellingProducts,
       slotDistribution,
       upcomingPickups,
+      pendingRefundCount,
+      pendingRefunds,
     });
   } catch (err) {
     next(err);
@@ -338,9 +370,9 @@ export const rejectApplication = async (req: Request, res: Response, next: NextF
 // A7: tambah filter pickupDate=YYYY-MM-DD dan paymentMethod
 export const listOrders = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { status, search, pickupDate, paymentMethod, page, limit } = req.query;
+    const { status, search, pickupDate, paymentMethod, artisanId, refundStatus, page, limit } = req.query;
 
-    for (const [name, value] of Object.entries({ status, search, pickupDate, paymentMethod, page, limit })) {
+    for (const [name, value] of Object.entries({ status, search, pickupDate, paymentMethod, artisanId, refundStatus, page, limit })) {
       if (value !== undefined && typeof value !== "string") {
         return res.status(400).json({ error: `${name} harus berupa string` });
       }
@@ -383,6 +415,18 @@ export const listOrders = async (req: Request, res: Response, next: NextFunction
       where.paymentMethod = paymentMethod;
     }
 
+    if (typeof refundStatus === "string") {
+      if (!["tidak_ada", "menunggu", "selesai"].includes(refundStatus)) {
+        return res.status(400).json({ error: "refundStatus tidak valid" });
+      }
+      where.refundStatus = refundStatus;
+    }
+
+    // Filter pesanan yang memuat produk dari penjual tertentu (kreator atau Official Store)
+    if (typeof artisanId === "string" && artisanId.trim()) {
+      where.items = { some: { product: { artisanId: artisanId.trim() } } };
+    }
+
     let total: number | undefined = undefined;
     if (parsedPage !== undefined && parsedLimit !== undefined) {
       total = await prisma.order.count({ where });
@@ -396,7 +440,12 @@ export const listOrders = async (req: Request, res: Response, next: NextFunction
         : {}),
       include: {
         user: { select: { id: true, name: true, email: true } },
-        items: { include: { product: true, variant: true } },
+        items: {
+          include: {
+            product: { include: { artisan: { select: { id: true, brandName: true, isOfficial: true } } } },
+            variant: true,
+          },
+        },
         payment: true,
       },
     });
@@ -421,7 +470,7 @@ export const listOrders = async (req: Request, res: Response, next: NextFunction
 export const updateOrderStatus = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
+    const { status, cancelReason } = req.body;
 
     const allowedStatuses = [
       "menunggu_bayar",
@@ -435,6 +484,10 @@ export const updateOrderStatus = async (req: Request, res: Response, next: NextF
     if (!status || !allowedStatuses.includes(status)) {
       return res.status(400).json({ error: "Status tidak valid" });
     }
+    if (status === "dibatalkan" && cancelReason !== undefined &&
+      (typeof cancelReason !== "string" || !["permintaan_pembeli", "kesalahan_toko"].includes(cancelReason))) {
+      throw new HttpError(400, "cancelReason tidak valid", "INVALID_CANCEL_REASON");
+    }
 
     const updatedOrder = await prisma.$transaction(async (tx) => {
       // Kunci baris sebelum membaca status agar dua admin yang bersamaan
@@ -446,7 +499,7 @@ export const updateOrderStatus = async (req: Request, res: Response, next: NextF
 
       const order = await tx.order.findUnique({
         where: { id },
-        include: { items: true },
+        include: { items: true, payment: true },
       });
       if (!order) {
         throw { status: 404, message: "Pesanan tidak ditemukan" };
@@ -465,6 +518,22 @@ export const updateOrderStatus = async (req: Request, res: Response, next: NextF
       };
       if (oldStatus !== status && !allowedTransitions[oldStatus]?.includes(status)) {
         throw { status: 400, message: `Transisi status ${oldStatus} ke ${status} tidak diizinkan` };
+      }
+
+      if (status === "dibatalkan") {
+        if (oldStatus === "dibatalkan") return order;
+        const settings = await tx.appSettings.findUnique({ where: { id: 1 } });
+        const refund = computeRefund({ order, payment: order.payment, settings });
+        const effectiveReason = cancelReason || (refund.paid ? "kesalahan_toko" : undefined);
+        if (effectiveReason === "permintaan_pembeli" && refund.paid) {
+          if (oldStatus === "lewat_batas_pengambilan") {
+            throw new HttpError(400, "Pesanan sudah lewat batas pengambilan. Gunakan alasan kesalahan toko bila memang kesalahan toko.", "PICKUP_DEADLINE_PASSED");
+          }
+          if (!refund.canCancelByBuyerRequest) {
+            throw new HttpError(400, "Batas waktu refund sudah lewat. Gunakan alasan kesalahan toko bila memang kesalahan toko.", "REFUND_WINDOW_PASSED");
+          }
+        }
+        return cancelOrderInTx(tx, order, { reason: effectiveReason as "permintaan_pembeli" | "kesalahan_toko" | undefined });
       }
 
       // 1. Jika pindah ke 'lunas' dan pickupDeadline belum ada, hitung pickupDeadline
@@ -512,9 +581,47 @@ export const updateOrderStatus = async (req: Request, res: Response, next: NextF
 
     res.json({ message: "Status pesanan berhasil diperbarui", order: updatedOrder });
   } catch (err: any) {
-    if (err?.status) {
-      return res.status(err.status).json({ error: err.message });
+    if (err instanceof HttpError) {
+      return next(err);
     }
+    if (err?.status) {
+      return res.status(err.status).json({ error: err.message, ...(err.code ? { code: err.code } : {}) });
+    }
+    next(err);
+  }
+};
+
+// PATCH /api/admin/orders/:id/refunded — Admin menandai refund manual sudah selesai
+export const markOrderRefunded = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const result = await prisma.$transaction(async (tx) => {
+      const lockedRows: Array<{ id: string }> = await tx.$queryRaw`SELECT id FROM orders WHERE id = ${id} FOR UPDATE`;
+      if (lockedRows.length === 0) throw new HttpError(404, "Pesanan tidak ditemukan", "NOT_FOUND");
+
+      const order = await tx.order.findUnique({ where: { id } });
+      if (!order) throw new HttpError(404, "Pesanan tidak ditemukan", "NOT_FOUND");
+      if (order.refundStatus !== "menunggu") {
+        throw new HttpError(409, "Pesanan ini tidak sedang menunggu refund", "REFUND_NOT_PENDING");
+      }
+
+      const updated = await tx.order.update({
+        where: { id },
+        data: { refundStatus: "selesai", refundedAt: new Date() },
+      });
+      await tx.notification.create({
+        data: {
+          userId: order.userId,
+          type: "pesanan_update",
+          title: "Dana Dikembalikan",
+          body: `Pengembalian dana untuk pesanan ${order.orderNumber} sudah diproses oleh admin.`,
+        },
+      });
+      return updated;
+    });
+
+    res.json({ message: "Refund ditandai selesai", order: result });
+  } catch (err) {
     next(err);
   }
 };
@@ -672,7 +779,7 @@ export const getSettings = async (req: Request, res: Response, next: NextFunctio
 // PUT /api/admin/settings — Update pengaturan sistem (AppSettings)
 export const updateSettings = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { holdDurationMinutes, autoCancelEnabled, pickupDeadlineDays, whatsappAdminNumber, notificationEmail } = req.body;
+    const { holdDurationMinutes, autoCancelEnabled, pickupDeadlineDays, whatsappAdminNumber, notificationEmail, refundWindowDays } = req.body;
 
     // F-23: Validasi rentang angka
     let parsedHold: number | undefined = undefined;
@@ -688,6 +795,14 @@ export const updateSettings = async (req: Request, res: Response, next: NextFunc
       parsedDeadline = parseInt(pickupDeadlineDays);
       if (isNaN(parsedDeadline) || ![7, 14, 30].includes(parsedDeadline)) {
         return res.status(400).json({ error: "pickupDeadlineDays harus bernilai 7, 14, atau 30 hari" });
+      }
+    }
+
+    let parsedRefundWindow: number | undefined = undefined;
+    if (refundWindowDays !== undefined) {
+      parsedRefundWindow = parseInt(refundWindowDays);
+      if (isNaN(parsedRefundWindow) || typeof refundWindowDays !== "number" || ![1, 3, 7].includes(parsedRefundWindow)) {
+        return res.status(400).json({ error: "refundWindowDays harus bernilai 1, 3, atau 7 hari" });
       }
     }
 
@@ -716,6 +831,7 @@ export const updateSettings = async (req: Request, res: Response, next: NextFunc
         ...(parsedDeadline !== undefined && { pickupDeadlineDays: parsedDeadline }),
         ...(whatsappAdminNumber !== undefined && { whatsappAdminNumber }),
         ...(notificationEmail !== undefined && { notificationEmail }),
+        ...(parsedRefundWindow !== undefined && { refundWindowDays: parsedRefundWindow }),
       },
       update: {
         ...(parsedHold !== undefined && { holdDurationMinutes: parsedHold }),
@@ -723,6 +839,7 @@ export const updateSettings = async (req: Request, res: Response, next: NextFunc
         ...(parsedDeadline !== undefined && { pickupDeadlineDays: parsedDeadline }),
         ...(whatsappAdminNumber !== undefined && { whatsappAdminNumber }),
         ...(notificationEmail !== undefined && { notificationEmail }),
+        ...(parsedRefundWindow !== undefined && { refundWindowDays: parsedRefundWindow }),
       },
     });
 
@@ -781,6 +898,10 @@ export const toggleArtisanStatus = async (req: Request, res: Response, next: Nex
       return res.status(404).json({ error: "Kreator tidak ditemukan" });
     }
 
+    if (artisan.isOfficial) {
+      throw new HttpError(400, "Official Store tidak dapat dinonaktifkan", "OFFICIAL_STORE_PROTECTED");
+    }
+
     const newStatus = artisan.status === "aktif" ? "nonaktif" : "aktif";
     const updated = await prisma.artisan.update({
       where: { id },
@@ -796,15 +917,21 @@ export const toggleArtisanStatus = async (req: Request, res: Response, next: Nex
 // GET /api/admin/artisans — A5: Daftar seluruh kreator untuk admin (dengan productCount, avgRating, user.email)
 export const listAdminArtisans = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { status } = req.query;
+    const { status, isOfficial } = req.query;
     const where: any = {};
     if (status === "aktif" || status === "nonaktif") {
       where.status = status;
     }
+    if (isOfficial !== undefined) {
+      if (isOfficial !== "true" && isOfficial !== "false") {
+        return res.status(400).json({ error: "isOfficial harus 'true' atau 'false'" });
+      }
+      where.isOfficial = isOfficial === "true";
+    }
 
     const artisans = await prisma.artisan.findMany({
       where,
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ isOfficial: "desc" }, { createdAt: "desc" }],
       include: {
         user: { select: { id: true, name: true, email: true, avatarUrl: true } },
         products: { select: { id: true, isActive: true } },
@@ -842,6 +969,7 @@ export const listAdminArtisans = async (req: Request, res: Response, next: NextF
         bio: a.bio,
         avatarUrl: a.avatarUrl,
         status: a.status,
+        isOfficial: a.isOfficial,
         createdAt: a.createdAt,
         updatedAt: a.updatedAt,
         user: a.user,
@@ -859,17 +987,24 @@ export const listAdminArtisans = async (req: Request, res: Response, next: NextF
 // GET /api/admin/products — A5: Daftar seluruh produk untuk admin (termasuk nonaktif)
 export const listAdminProducts = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { q, categoryId } = req.query;
+    const { q, categoryId, artisanId } = req.query;
     if (q !== undefined && typeof q !== "string") {
       return res.status(400).json({ error: "q harus berupa string" });
     }
     if (categoryId !== undefined && typeof categoryId !== "string") {
       return res.status(400).json({ error: "categoryId harus berupa string" });
     }
+    if (artisanId !== undefined && typeof artisanId !== "string") {
+      return res.status(400).json({ error: "artisanId harus berupa string" });
+    }
     const where: any = {};
 
     if (typeof categoryId === "string" && categoryId.trim()) {
       where.categoryId = categoryId.trim();
+    }
+
+    if (typeof artisanId === "string" && artisanId.trim()) {
+      where.artisanId = artisanId.trim();
     }
 
     if (typeof q === "string" && q.trim()) {
@@ -1024,6 +1159,7 @@ export default {
   rejectApplication,
   listOrders,
   updateOrderStatus,
+  markOrderRefunded,
   extendOrderHold,
   verifyScanQr,
   getSettings,

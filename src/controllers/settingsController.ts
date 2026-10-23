@@ -14,6 +14,7 @@ export const getPublicSettings = async (req: Request, res: Response, next: NextF
         whatsappAdminNumber: settings.whatsappAdminNumber,
         holdDurationMinutes: settings.holdDurationMinutes,
         pickupDeadlineDays: settings.pickupDeadlineDays,
+        refundWindowDays: settings.refundWindowDays,
       },
     });
   } catch (err) {

@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import crypto from "crypto";
 import prisma from "../lib/prisma";
 import { effectiveStock } from "../lib/stock";
+import { isPaymentSuccess } from "../lib/paymentStatus";
 
 // POST /api/payments/webhook — Terima Notifikasi Webhook dari Server Midtrans (TANPA requireAuth)
 export const handleWebhook = async (req: Request, res: Response, next: NextFunction) => {
@@ -60,7 +61,7 @@ export const handleWebhook = async (req: Request, res: Response, next: NextFunct
     }
 
     let isPaid = false;
-    let isSettlement = transaction_status === "settlement" || (transaction_status === "capture" && fraud_status === "accept");
+    const isSettlement = isPaymentSuccess(transaction_status, fraud_status);
 
     if (isSettlement) {
       isPaid = true;
@@ -214,6 +215,10 @@ export const handleWebhook = async (req: Request, res: Response, next: NextFunct
             resultStatus = freshOrder.status;
 
             if (!existingPayment || existingPayment.status !== "settlement") {
+              await tx.order.update({
+                where: { id: freshOrder.id },
+                data: { refundStatus: "menunggu" },
+              });
               await tx.notification.create({
                 data: {
                   userId: freshOrder.userId,
@@ -244,6 +249,10 @@ export const handleWebhook = async (req: Request, res: Response, next: NextFunct
           resultStatus = freshOrder.status;
 
           if (!existingPayment || existingPayment.status !== "settlement") {
+            await tx.order.update({
+              where: { id: freshOrder.id },
+              data: { refundStatus: "menunggu" },
+            });
             await tx.notification.create({
               data: {
                 userId: freshOrder.userId,

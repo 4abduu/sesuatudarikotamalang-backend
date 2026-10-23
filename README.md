@@ -87,6 +87,18 @@ Password tidak pernah disimpan sebagai plain text dan di-hash dengan bcrypt. OTP
 
 Penegakan dilakukan berlapis: `requireAuth` dan `requireRole` untuk pemeriksaan kasar, policy/DAL untuk batas sebenarnya, serta kolom pemilik pada setiap query resource privat. `401` dengan `code: "UNAUTHORIZED"` berarti login ulang; `403` dengan `code: "FORBIDDEN"` berarti role atau izin tidak mencukupi; resource milik pengguna lain dikembalikan sebagai `404`. Token berada di header, bukan cookie, sehingga endpoint API ini tidak menggunakan cookie authentication dan tidak memerlukan mitigasi CSRF berbasis cookie.
 
+## Official Store dan Refund
+
+Official Store adalah penjual khusus yang tidak memiliki akun login. Buat secara idempoten dengan:
+
+```bash
+npm run prisma:seed:official
+```
+
+Perintah tersebut hanya membuat baris Official Store bila belum ada dan aman dijalankan pada database utama. Admin dapat membuat produk atas nama Official Store atau kreator aktif.
+
+Refund Midtrans dilakukan manual melalui WhatsApp admin; backend tidak memanggil API refund Midtrans. Sistem menghitung batas refund berdasarkan `refundWindowDays` (1, 3, atau 7 hari) dan jadwal pickup, lalu mencatat `refundStatus` sampai admin menandai refund selesai. Pesanan yang sudah melewati batas pengambilan tidak dapat dibatalkan atas permintaan pembeli, kecuali karena kesalahan toko. Default hold Cash/QRIS adalah 1 hari (1440 menit). Baris pengaturan lama di database tidak berubah otomatis dan perlu diperbarui melalui Pengaturan admin.
+
 ### Akun uji untuk penilaian
 
 Akun demo terpisah dibuat oleh seed hanya jika `SEED_DEMO_PASSWORD` diisi. Seed bersifat idempoten dan tidak mengubah akun demo yang sudah ada.

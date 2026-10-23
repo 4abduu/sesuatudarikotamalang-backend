@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcrypt";
+import { ensureOfficialStore } from "../src/lib/officialStore";
 
 const prisma = new PrismaClient();
 
@@ -120,6 +121,10 @@ async function main() {
     artisans[c.name] = artisan;
   }
   console.log("✅ Akun Admin, Buyer, dan 3 Kreator berhasil disiapkan.");
+
+  // 2a. OFFICIAL STORE (penjual resmi toko, tanpa akun login; idempoten)
+  const officialResult = await ensureOfficialStore(prisma);
+  console.log(officialResult.created ? "Official Store dibuat." : "Official Store sudah ada.");
 
   // 2b. AKUN DEMO PENILAIAN (terpisah dari akun operasional di atas)
   const demoRawPassword = process.env.SEED_DEMO_PASSWORD;
@@ -382,7 +387,7 @@ async function main() {
     update: {},
     create: {
       id: 1,
-      holdDurationMinutes: 120,
+      holdDurationMinutes: 1440,
       autoCancelEnabled: true,
       pickupDeadlineDays: 14,
       whatsappAdminNumber: "+6281234567890",

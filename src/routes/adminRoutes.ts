@@ -26,6 +26,9 @@ router.get("/orders", adminController.listOrders);
 // PATCH /api/admin/orders/:id/status — Admin ubah status order secara manual
 router.patch("/orders/:id/status", adminController.updateOrderStatus);
 
+// PATCH /api/admin/orders/:id/refunded — Tandai refund manual selesai
+router.patch("/orders/:id/refunded", adminController.markOrderRefunded);
+
 // PATCH /api/admin/orders/:id/extend-hold — Admin perpanjang waktu hold pesanan Cash/QRIS
 router.patch("/orders/:id/extend-hold", adminController.extendOrderHold);
 
