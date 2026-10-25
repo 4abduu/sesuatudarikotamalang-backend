@@ -3,7 +3,7 @@ import crypto from "crypto";
 import prisma from "../lib/prisma";
 import { effectiveStock } from "../lib/stock";
 import { snap } from "../lib/midtrans";
-import { getPickupSlots, getSlotCapacity } from "../lib/slots";
+import { getPickupSlots, getSlotCapacity, getPickupLeadMinutes, isSlotPassed, isSlotClosed } from "../lib/slots";
 import { isRetryableTransactionError } from "../lib/txRetry";
 import { toWibDateString, todayWibString } from "../lib/dates";
 import { cancelOrderForUser, getOrderForUser, listMyOrders } from "../dal/orders";
@@ -94,6 +94,20 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
     const maxDateStr = maxDate.toISOString().slice(0, 10);
     if (pickupDateStr > maxDateStr) {
       return res.status(400).json({ error: "pickupDate maksimal 14 hari dari hari ini" });
+    }
+
+    // Pickup di hari yang sama diperbolehkan selama pemesanan slot belum ditutup: jam mulai (WIB)
+    // belum terlewati dan masih di luar jeda minimal (default 30 menit sebelum jam mulai).
+    // Toko buka 7 hari seminggu, jadi tidak ada penolakan berdasarkan hari dalam minggu.
+    // Kode `SLOT_PASSED` dipakai untuk kedua kasus (sudah lewat dan terlalu dekat); pesannya berbeda.
+    const leadMinutes = getPickupLeadMinutes();
+    if (isSlotClosed(pickupDateStr, pickupSlot, Date.now(), leadMinutes)) {
+      return res.status(400).json({
+        error: isSlotPassed(pickupDateStr, pickupSlot)
+          ? "Slot pickup ini sudah lewat. Silakan pilih slot atau tanggal lain."
+          : `Pemesanan slot ini sudah ditutup. Pesan paling lambat ${leadMinutes} menit sebelum jam pickup, atau pilih slot lain.`,
+        code: "SLOT_PASSED",
+      });
     }
 
     const userId = req.user.id;

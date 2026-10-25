@@ -62,6 +62,7 @@ const suites = [
   "test_refund_policy.js",                // Langkah 5a: kebijakan refund murni
   "test_refund_flow.js",                  // Langkah 5c-5g: alur refund admin
   "test_refund_webhook.js",               // Langkah 5f: late settlement
+  "test_pickup_slot_time.js",             // Slot pickup: hari yang sama, slot lewat, hari Minggu
   "step2_schema_check.js"
   // TIDAK dimasukkan: test_ai_integration.js (butuh server live + Gemini sungguhan)
   // TIDAK dimasukkan: test-cloudinary.js (butuh jaringan + kredensial Cloudinary)

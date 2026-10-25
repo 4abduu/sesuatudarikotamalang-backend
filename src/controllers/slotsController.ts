@@ -1,12 +1,20 @@
 import { Request, Response, NextFunction } from "express";
 import prisma from "../lib/prisma";
-import { getPickupSlots, getSlotCapacity } from "../lib/slots";
+import { getPickupSlots, getSlotCapacity, getPickupLeadMinutes, isSlotPassed, isSlotClosed } from "../lib/slots";
 import { toWibDateString } from "../lib/dates";
 
 /**
  * GET /api/slots?date=YYYY-MM-DD
  * Publik: mengembalikan ketersediaan slot pickup untuk tanggal tertentu.
- * Response: { slots: [{ time, capacity, booked, available }] }
+ * Response: { date, serverNow, leadMinutes, slots: [{ time, capacity, booked, available, isPast, isClosed, bookable }] }
+ *
+ * - available: sisa kapasitas (kapasitas dikurangi pesanan aktif), tidak memperhitungkan jam.
+ * - isPast: true bila jam mulai slot (WIB) pada tanggal itu sudah terlewati.
+ * - isClosed: true bila pemesanan sudah ditutup: jam mulai sudah lewat ATAU waktu sekarang sudah
+ *   masuk jeda minimal `leadMinutes` (default 30 menit) sebelum jam mulai. isPast selalu berarti isClosed.
+ * - bookable: true bila slot belum ditutup DAN masih ada kapasitas. Klien memakai field ini
+ *   untuk mengaktifkan/menonaktifkan pilihan slot.
+ * Toko buka 7 hari seminggu; tidak ada tanggal yang ditolak karena hari dalam minggu.
  */
 export const getSlots = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -71,18 +79,25 @@ export const getSlots = async (req: Request, res: Response, next: NextFunction) 
 
     const allSlots = getPickupSlots();
     const capacity = getSlotCapacity();
+    const leadMinutes = getPickupLeadMinutes();
 
     const slots = allSlots.map((time) => {
       const booked = countMap[time] || 0;
+      const available = Math.max(0, capacity - booked);
+      const isPast = isSlotPassed(dateString, time, now);
+      const isClosed = isSlotClosed(dateString, time, now, leadMinutes);
       return {
         time,
         capacity,
         booked,
-        available: Math.max(0, capacity - booked),
+        available,
+        isPast,
+        isClosed,
+        bookable: !isClosed && available > 0,
       };
     });
 
-    res.json({ date: dateString, slots });
+    res.json({ date: dateString, serverNow: now.toISOString(), leadMinutes, slots });
   } catch (err) {
     next(err);
   }

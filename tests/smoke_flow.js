@@ -167,7 +167,7 @@ async function runSmokeFlow() {
   if (sampleProductId) {
     resOrder = await makeRequest("POST", "/api/orders", {
       productId: sampleProductId,
-      pickupDate: new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10),
+      pickupDate: new Date(Date.now() + 7 * 3600 * 1000 + 11 * 86400000).toISOString().slice(0, 10),
       pickupSlot: "10:00",
       paymentMethod: "cod",
     }, buyerToken);

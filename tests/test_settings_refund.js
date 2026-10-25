@@ -131,8 +131,12 @@ async function testCodHoldDefault() {
   });
   const variant = await prisma.productVariant.create({ data: { productId: product.id, combination: [], stock: 5 } });
 
-  // Pilih tanggal besok dan slot pertama yang ada
-  const tomorrowStr = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  // Tanggal pickup 12 hari ke depan (WIB), sengaja jauh dari tanggal yang dipakai tes lain
+  // (besok, +2, +5 sampai +7, +11, +13) agar tidak berebut kapasitas slot dengan data sisa mereka.
+  const { todayWibString } = require("../dist/lib/dates");
+  const pickupBase = new Date(`${todayWibString()}T00:00:00Z`);
+  pickupBase.setUTCDate(pickupBase.getUTCDate() + 12);
+  const tomorrowStr = pickupBase.toISOString().slice(0, 10);
   const before = Date.now();
   const req = {
     body: {

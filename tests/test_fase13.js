@@ -5,6 +5,8 @@ require("./helpers/requireTestDb")();
 // eksplisit di sini agar tidak bertabrakan dengan aturan slot. Aturan slot diuji terpisah di
 // test_concurrency_orders.js dan test_paketa_features.js.
 process.env.SLOT_CAPACITY = "50";
+// Tanggal pickup = 13 hari ke depan (WIB): tes ini tidak membersihkan pesanannya, jadi tanggalnya
+// sengaja dipisahkan dari tes lain (besok, +2, +5 sampai +7, +11, +12) agar tidak menghabiskan kapasitas slot mereka.
 
 const crypto = require("crypto");
 const prisma = require("../dist/lib/prisma").default || require("../dist/lib/prisma");
@@ -121,7 +123,7 @@ async function runTests() {
   const reqResOrder1 = createMockReqRes(
     {
       productId: singleStockProduct.id,
-      pickupDate: new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10),
+      pickupDate: new Date(Date.now() + 7 * 3600 * 1000 + 13 * 86400000).toISOString().slice(0, 10),
       pickupSlot: "10:00",
       paymentMethod: "cod",
     },
@@ -140,7 +142,7 @@ async function runTests() {
   const reqResOrder2 = createMockReqRes(
     {
       productId: singleStockProduct.id,
-      pickupDate: new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10),
+      pickupDate: new Date(Date.now() + 7 * 3600 * 1000 + 13 * 86400000).toISOString().slice(0, 10),
       pickupSlot: "10:00",
       paymentMethod: "cod",
     },
@@ -387,7 +389,7 @@ async function runTests() {
   const reqResP5a = createMockReqRes(
     {
       productId: productHoldP5.id,
-      pickupDate: new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10),
+      pickupDate: new Date(Date.now() + 7 * 3600 * 1000 + 13 * 86400000).toISOString().slice(0, 10),
       pickupSlot: "10:00",
       paymentMethod: "cod",
     },
@@ -421,7 +423,7 @@ async function runTests() {
   const reqResP5b = createMockReqRes(
     {
       productId: productHoldP5.id,
-      pickupDate: new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10),
+      pickupDate: new Date(Date.now() + 7 * 3600 * 1000 + 13 * 86400000).toISOString().slice(0, 10),
       pickupSlot: "10:00",
       paymentMethod: "cod",
     },
@@ -491,7 +493,7 @@ async function runTests() {
   const reqResMidP5 = createMockReqRes(
     {
       productId: productMidP5.id,
-      pickupDate: new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10),
+      pickupDate: new Date(Date.now() + 7 * 3600 * 1000 + 13 * 86400000).toISOString().slice(0, 10),
       pickupSlot: "10:00",
       paymentMethod: "cod",
     },
@@ -527,4 +529,3 @@ runTests()
   .finally(async () => {
     await prisma.$disconnect();
   });
-  
