@@ -426,9 +426,28 @@ model AppSettings {
   autoCancelEnabled   Boolean  @default(true)
   pickupDeadlineDays  Int      @default(14) // opsi yang divalidasi di aplikasi: 7 / 14 / 30
   refundWindowDays    Int      @default(3)  // batas waktu refund permintaan pembeli; opsi di aplikasi: 1 / 3 / 7
+  pickupOpenTime      String   @default("09:00") @db.VarChar(5)
+  pickupCloseTime     String   @default("23:00") @db.VarChar(5)
+  pickupLeadMinutes   Int      @default(30)
   whatsappAdminNumber String?
   notificationEmail   String?
   updatedAt           DateTime @updatedAt
 
   @@map("app_settings")
+}
+
+// ----------------------------------------------------------------------------
+// JADWAL PICKUP
+// ----------------------------------------------------------------------------
+
+model PickupSlot {
+  id        String   @id @default(cuid())
+  time      String   @unique @db.VarChar(5) // "HH:MM", kelipatan 30 menit, berformat dua digit
+  capacity  Int      @default(3)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive])
+  @@map("pickup_slots")
 }

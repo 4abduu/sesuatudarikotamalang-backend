@@ -4,7 +4,7 @@ const assert = require("assert");
 const prisma = require("../dist/lib/prisma").default || require("../dist/lib/prisma");
 const { createOrder } = require("../dist/controllers/ordersController");
 const { getSlots } = require("../dist/controllers/slotsController");
-const { isSlotPassed, isSlotClosed, getPickupSlots, getPickupLeadMinutes } = require("../dist/lib/slots");
+const { isSlotPassed, isSlotClosed, getPickupConfig } = require("../dist/lib/slots");
 const { todayWibString } = require("../dist/lib/dates");
 
 const mockReqRes = (body, user, query = {}) => {
@@ -53,31 +53,14 @@ function testPureFunction() {
   assert.strictEqual(isSlotClosed("2026-10-25", "10:00", at("2026-10-24T23:59:00+07:00"), 30), false, "besok tidak ditutup");
   assert.strictEqual(isSlotClosed("2026-10-24", "abc", at("2026-10-24T23:00:00+07:00"), 30), false, "format tak dikenal");
   assert.strictEqual(isSlotClosed("2026-10-25", "00:10", at("2026-10-24T23:50:00+07:00"), 30), true, "jeda melewati tengah malam");
-
-  // Konfigurasi jeda dari env
-  const previous = process.env.PICKUP_LEAD_MINUTES;
-  try {
-    delete process.env.PICKUP_LEAD_MINUTES;
-    assert.strictEqual(getPickupLeadMinutes(), 30, "default 30");
-    process.env.PICKUP_LEAD_MINUTES = "15";
-    assert.strictEqual(getPickupLeadMinutes(), 15);
-    process.env.PICKUP_LEAD_MINUTES = "0";
-    assert.strictEqual(getPickupLeadMinutes(), 0);
-    for (const bad of ["abc", "-5", "1.5", "2000", ""]) {
-      process.env.PICKUP_LEAD_MINUTES = bad;
-      assert.strictEqual(getPickupLeadMinutes(), 30, `nilai tidak valid "${bad}" memakai default`);
-    }
-  } finally {
-    if (previous === undefined) delete process.env.PICKUP_LEAD_MINUTES;
-    else process.env.PICKUP_LEAD_MINUTES = previous;
-  }
 }
 
 async function testGetSlots() {
   const today = todayWibString();
   const yesterday = datePlusDays(-1);
   const tomorrow = datePlusDays(1);
-  const slots = getPickupSlots();
+  const config = await getPickupConfig();
+  const slots = config.slots.filter((s) => s.isActive).map((s) => s.time);
 
   for (const [label, date, expectAllPast, expectNonePast] of [
     ["kemarin", yesterday, true, false],
@@ -90,7 +73,7 @@ async function testGetSlots() {
     assert.strictEqual(r.jsonResponse.date, date, label);
     assert(!Number.isNaN(Date.parse(r.jsonResponse.serverNow)), `${label}: serverNow harus ISO`);
     assert.strictEqual(r.jsonResponse.slots.length, slots.length, label);
-    assert.strictEqual(r.jsonResponse.leadMinutes, getPickupLeadMinutes(), `${label}: leadMinutes`);
+    assert.strictEqual(r.jsonResponse.leadMinutes, config.leadMinutes, `${label}: leadMinutes`);
     for (const s of r.jsonResponse.slots) {
       assert.strictEqual(typeof s.isPast, "boolean", label);
       assert.strictEqual(typeof s.isClosed, "boolean", label);
@@ -151,10 +134,11 @@ async function testCreateOrder() {
 
   try {
     const today = todayWibString();
-    const slots = getPickupSlots();
+    const config = await getPickupConfig();
+    const slots = config.slots.filter((s) => s.isActive).map((s) => s.time);
     const passedToday = slots.filter((s) => isSlotPassed(today, s));
-    const futureToday = slots.filter((s) => !isSlotClosed(today, s)); // masih terbuka (di luar jeda)
-    const inLeadWindow = slots.filter((s) => !isSlotPassed(today, s) && isSlotClosed(today, s)); // ditutup tapi belum mulai
+    const futureToday = slots.filter((s) => !isSlotClosed(today, s, Date.now(), config.leadMinutes)); // masih terbuka (di luar jeda)
+    const inLeadWindow = slots.filter((s) => !isSlotPassed(today, s) && isSlotClosed(today, s, Date.now(), config.leadMinutes)); // ditutup tapi belum mulai
 
     if (passedToday.length > 0) {
       const u = await makeUser("passed");

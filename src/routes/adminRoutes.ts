@@ -2,6 +2,7 @@ import express from "express";
 import { requireAuth } from "../middleware/authMiddleware";
 import { requireRole } from "../middleware/requireRole";
 import adminController from "../controllers/adminController";
+import pickupScheduleController from "../controllers/pickupScheduleController";
 
 const router = express.Router();
 
@@ -61,5 +62,12 @@ router.patch("/products/:id/active", adminController.toggleProductActive);
 
 // GET /api/admin/reviews — A5: Daftar seluruh ulasan untuk admin
 router.get("/reviews", adminController.listAdminReviews);
+
+// Jadwal Pickup Admin
+router.get("/pickup-schedule", pickupScheduleController.getAdminPickupSchedule);
+router.patch("/pickup-schedule/settings", pickupScheduleController.updateAdminPickupScheduleSettings);
+router.post("/pickup-slots", pickupScheduleController.createAdminPickupSlot);
+router.patch("/pickup-slots/:id", pickupScheduleController.updateAdminPickupSlot);
+router.delete("/pickup-slots/:id", pickupScheduleController.deleteAdminPickupSlot);
 
 export default router;

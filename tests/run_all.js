@@ -42,6 +42,7 @@ const suites = [
   // AI
   "test_ai_story_draft.js",
   "test_ai_story_draft_v2.js",     // versi lengkap dengan alias & retry
+  "test_ai_story_draft_v3.js",     // AI cerita 3 bagian
   // Fitur baru Langkah 1–4
   "test_profile_cloudinary.js",    // Langkah 1: avatar Cloudinary
   "test_change_email_flow.js",     // Langkah 2: alur ganti email
@@ -63,6 +64,7 @@ const suites = [
   "test_refund_flow.js",                  // Langkah 5c-5g: alur refund admin
   "test_refund_webhook.js",               // Langkah 5f: late settlement
   "test_pickup_slot_time.js",             // Slot pickup: hari yang sama, slot lewat, hari Minggu
+  "test_pickup_schedule.js",              // Fase B: jadwal pickup database & endpoint admin
   "step2_schema_check.js"
   // TIDAK dimasukkan: test_ai_integration.js (butuh server live + Gemini sungguhan)
   // TIDAK dimasukkan: test-cloudinary.js (butuh jaringan + kredensial Cloudinary)

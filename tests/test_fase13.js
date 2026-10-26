@@ -4,7 +4,6 @@ require("./helpers/requireTestDb")();
 // Tes ini membuat banyak order pada slot dan tanggal yang sama. Kapasitas slot dinaikkan secara
 // eksplisit di sini agar tidak bertabrakan dengan aturan slot. Aturan slot diuji terpisah di
 // test_concurrency_orders.js dan test_paketa_features.js.
-process.env.SLOT_CAPACITY = "50";
 // Tanggal pickup = 13 hari ke depan (WIB): tes ini tidak membersihkan pesanannya, jadi tanggalnya
 // sengaja dipisahkan dari tes lain (besok, +2, +5 sampai +7, +11, +12) agar tidak menghabiskan kapasitas slot mereka.
 
@@ -12,6 +11,7 @@ const crypto = require("crypto");
 const prisma = require("../dist/lib/prisma").default || require("../dist/lib/prisma");
 const { handleWebhook } = require("../dist/controllers/paymentsController");
 const { createOrder } = require("../dist/controllers/ordersController");
+const { snapshotSlots, restoreSlots, setAllCapacity } = require("./helpers/pickupSlots");
 
 // Helper Mock Express req/res/next
 function createMockReqRes(body, user = null) {
@@ -49,7 +49,8 @@ async function runTests() {
 
   const originalServerKey = process.env.MIDTRANS_SERVER_KEY;
   const testServerKey = process.env.MIDTRANS_SERVER_KEY || "test_env_server_key";
-  process.env.MIDTRANS_SERVER_KEY = testServerKey;
+  const slotSnapshot = await snapshotSlots(prisma);
+  await setAllCapacity(prisma, 50);
 
   const createdIds = {
     users: [],
@@ -515,6 +516,8 @@ async function runTests() {
 
   // Restore env
   if (originalServerKey) process.env.MIDTRANS_SERVER_KEY = originalServerKey;
+
+  if (slotSnapshot) await restoreSlots(prisma, slotSnapshot);
 
   console.log("\n=== ALL FASE 13 TESTS RECOVERED AND PASSED SUCCESSFULLY ON TEST DB! ===");
   console.log("\n[LAPORAN DATA YANG DIBUAT DI DATABASE TEST]:");

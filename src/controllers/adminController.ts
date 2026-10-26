@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import prisma from "../lib/prisma";
-import { getPickupSlots, getSlotCapacity } from "../lib/slots";
+import { getPickupConfig } from "../lib/slots";
 import { HttpError } from "../lib/httpError";
 import { computeRefund } from "../lib/refund";
 import { cancelOrderInTx } from "../dal/orders";
@@ -160,17 +160,17 @@ export const getDashboard = async (req: Request, res: Response, next: NextFuncti
       totalRevenue: p.orderItems.reduce((sum, item) => sum + item.quantity * item.priceSnapshot, 0),
     }));
 
-    // A7: slotDistribution — semua slot dengan capacity, termasuk slot tanpa booking
-    const slots = getPickupSlots();
-    const capacity = getSlotCapacity();
+    // A7: slotDistribution — semua slot aktif dengan capacity masing-masing, termasuk slot tanpa booking
+    const pickupConfig = await getPickupConfig();
+    const activeSlots = pickupConfig.slots.filter((s) => s.isActive);
     const slotCountMap: Record<string, number> = {};
     for (const row of todaySlotOrders) {
       slotCountMap[row.pickupSlot] = row._count._all;
     }
-    const slotDistribution = slots.map((time) => ({
-      time,
-      capacity,
-      booked: slotCountMap[time] || 0,
+    const slotDistribution = activeSlots.map((s) => ({
+      time: s.time,
+      capacity: s.capacity,
+      booked: slotCountMap[s.time] || 0,
     }));
 
     const pendingRefunds = pendingRefundRows.map((order) => ({

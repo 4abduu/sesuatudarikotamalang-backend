@@ -15,13 +15,13 @@ const originalFetch = global.fetch;
 let counter = 0;
 const newCreator = () => ({ id: `ai-v2-${Date.now()}-${++counter}`, role: "creator" });
 
-function validDraft(extra = "") {
+function validDraft(extra = "", proses = "Sketsa tangan dulu lalu didigitalkan dan dirapikan.") {
   const kalimat =
     "Aku menggambar jendela tua itu pelan-pelan sambil mengingat sore yang hangat di kawasan Kayutangan. " +
     "Setiap garis lahir dari sketsa tangan lalu dirapikan sampai terasa seperti kenangan yang bisa dipegang. " +
     "Kami ingin karya kecil ini membawa suasana kota lama ke meja siapa pun yang menyimpannya. " +
     "Prosesnya sederhana, tetapi tiap langkah dikerjakan dengan sabar dan penuh perhatian pada detail. ";
-  return { judul: "Jendela yang Tak Pernah Tertutup", isi: `${kalimat}${extra}\n\n${kalimat}` };
+  return { judul: "Jendela yang Tak Pernah Tertutup", isi: `${kalimat}${extra}\n\n${kalimat}`, proses };
 }
 
 function geminiOk(obj) {

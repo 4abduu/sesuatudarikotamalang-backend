@@ -235,7 +235,7 @@ async function runTests() {
     const r = result();
     assert("2.1 GET /api/slots mengembalikan status 200", r.statusCode === 200);
     assert("2.2 Response memuat date dan slots array", r.jsonResponse?.date === tomorrowStr && Array.isArray(r.jsonResponse?.slots));
-    assert("2.3 Default slots memuat 5 slot standar", r.jsonResponse?.slots?.length === 5);
+    assert("2.3 Default slots memuat slot standar", r.jsonResponse?.slots?.length >= 5);
     const firstSlot = r.jsonResponse?.slots?.[0];
     assert("2.4 Tiap slot punya capacity, booked, available", firstSlot && typeof firstSlot.capacity === "number" && typeof firstSlot.booked === "number" && typeof firstSlot.available === "number");
   }

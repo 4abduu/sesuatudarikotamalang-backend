@@ -3,7 +3,7 @@ import crypto from "crypto";
 import prisma from "../lib/prisma";
 import { effectiveStock } from "../lib/stock";
 import { snap } from "../lib/midtrans";
-import { getPickupSlots, getSlotCapacity, getPickupLeadMinutes, isSlotPassed, isSlotClosed } from "../lib/slots";
+import { getPickupConfig, slotBookingWhere, isSlotPassed, isSlotClosed } from "../lib/slots";
 import { isRetryableTransactionError } from "../lib/txRetry";
 import { toWibDateString, todayWibString } from "../lib/dates";
 import { cancelOrderForUser, getOrderForUser, listMyOrders } from "../dal/orders";
@@ -73,10 +73,11 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
     }
     const normalizedPaymentMethod = paymentMethod as "midtrans" | "cod";
 
-    // A8: Validasi pickupSlot terhadap daftar slot yang dikonfigurasi
-    const configuredSlots = getPickupSlots();
-    if (!configuredSlots.includes(pickupSlot)) {
-      return res.status(400).json({ error: `pickupSlot tidak valid. Slot tersedia: ${configuredSlots.join(", ")}` });
+    // Validasi pickupSlot terhadap daftar slot yang aktif dari konfigurasi
+    const pickupConfig = await getPickupConfig();
+    const activeSlotTimes = pickupConfig.slots.filter((s) => s.isActive).map((s) => s.time);
+    if (!activeSlotTimes.includes(pickupSlot)) {
+      return res.status(400).json({ error: `pickupSlot tidak valid. Slot tersedia: ${activeSlotTimes.join(", ")}` });
     }
 
     // A8: Validasi pickupDate — tidak di masa lalu dan dalam jendela 14 hari.
@@ -100,7 +101,7 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
     // belum terlewati dan masih di luar jeda minimal (default 30 menit sebelum jam mulai).
     // Toko buka 7 hari seminggu, jadi tidak ada penolakan berdasarkan hari dalam minggu.
     // Kode `SLOT_PASSED` dipakai untuk kedua kasus (sudah lewat dan terlalu dekat); pesannya berbeda.
-    const leadMinutes = getPickupLeadMinutes();
+    const leadMinutes = pickupConfig.leadMinutes;
     if (isSlotClosed(pickupDateStr, pickupSlot, Date.now(), leadMinutes)) {
       return res.status(400).json({
         error: isSlotPassed(pickupDateStr, pickupSlot)
@@ -135,6 +136,39 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
       const autoCancel = settings?.autoCancelEnabled ?? true;
       const txNow = new Date();
 
+      // Periksa ulang ketersediaan slot di dalam transaksi
+      let slotCapacity = 3;
+      const slotRow = await tx.pickupSlot.findUnique({ where: { time: pickupSlot } });
+      if (slotRow) {
+        if (!slotRow.isActive) {
+          throw {
+            status: 400,
+            code: "SLOT_UNAVAILABLE",
+            message: "Slot pickup ini sudah tidak tersedia. Silakan pilih slot lain.",
+          };
+        }
+        slotCapacity = slotRow.capacity;
+      } else {
+        // Bila tabel pickup_slots kosong (menggunakan fallback), periksa apakah tabel benar-benar kosong
+        const totalSlotRows = await tx.pickupSlot.count();
+        if (totalSlotRows > 0) {
+          throw {
+            status: 400,
+            code: "SLOT_UNAVAILABLE",
+            message: "Slot pickup ini sudah tidak tersedia. Silakan pilih slot lain.",
+          };
+        }
+        const fallback = pickupConfig.slots.find((s) => s.time === pickupSlot && s.isActive);
+        if (!fallback) {
+          throw {
+            status: 400,
+            code: "SLOT_UNAVAILABLE",
+            message: "Slot pickup ini sudah tidak tersedia. Silakan pilih slot lain.",
+          };
+        }
+        slotCapacity = fallback.capacity;
+      }
+
       // F-07: Batasi jumlah order menunggu_bayar aktif per user (max 3)
       const activeConditionsUser: any[] = [
         {
@@ -168,31 +202,10 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
       }
 
       // A8: Validasi kapasitas slot DI DALAM transaksi (mencegah race condition)
-      const slotCapacity = getSlotCapacity();
       const pickupDayStart = new Date(pickupDateStr + "T00:00:00+07:00");
       const pickupDayEnd = new Date(pickupDayStart.getTime() + 86400000 - 1);
 
-      const slotConditions: any[] = [
-        { status: "lunas" as const },
-        { status: "selesai" as const },
-        {
-          status: "menunggu_bayar" as const,
-          paymentMethod: "midtrans" as const,
-          holdExpiresAt: { gt: txNow },
-        },
-      ];
-      if (autoCancel) {
-        slotConditions.push({
-          status: "menunggu_bayar" as const,
-          paymentMethod: "cod" as const,
-          holdExpiresAt: { gt: txNow },
-        });
-      } else {
-        slotConditions.push({
-          status: "menunggu_bayar" as const,
-          paymentMethod: "cod" as const,
-        });
-      }
+      const slotConditions = slotBookingWhere(autoCancel, txNow);
 
       const bookedCount = await tx.order.count({
         where: {

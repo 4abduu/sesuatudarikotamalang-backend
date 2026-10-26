@@ -1,20 +1,12 @@
 import { Request, Response, NextFunction } from "express";
 import prisma from "../lib/prisma";
-import { getPickupSlots, getSlotCapacity, getPickupLeadMinutes, isSlotPassed, isSlotClosed } from "../lib/slots";
+import { getPickupConfig, slotBookingWhere, isSlotPassed, isSlotClosed } from "../lib/slots";
 import { toWibDateString } from "../lib/dates";
 
 /**
  * GET /api/slots?date=YYYY-MM-DD
  * Publik: mengembalikan ketersediaan slot pickup untuk tanggal tertentu.
  * Response: { date, serverNow, leadMinutes, slots: [{ time, capacity, booked, available, isPast, isClosed, bookable }] }
- *
- * - available: sisa kapasitas (kapasitas dikurangi pesanan aktif), tidak memperhitungkan jam.
- * - isPast: true bila jam mulai slot (WIB) pada tanggal itu sudah terlewati.
- * - isClosed: true bila pemesanan sudah ditutup: jam mulai sudah lewat ATAU waktu sekarang sudah
- *   masuk jeda minimal `leadMinutes` (default 30 menit) sebelum jam mulai. isPast selalu berarti isClosed.
- * - bookable: true bila slot belum ditutup DAN masih ada kapasitas. Klien memakai field ini
- *   untuk mengaktifkan/menonaktifkan pilihan slot.
- * Toko buka 7 hari seminggu; tidak ada tanggal yang ditolak karena hari dalam minggu.
  */
 export const getSlots = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -33,41 +25,30 @@ export const getSlots = async (req: Request, res: Response, next: NextFunction) 
     const dayStart = new Date(dateString + "T00:00:00+07:00");
     const dayEnd = new Date(dayStart.getTime() + 86400000 - 1);
 
+    const config = await getPickupConfig();
+    const activeSlots = config.slots.filter((s) => s.isActive);
+
+    const now = new Date();
+
+    // Bila tidak ada slot aktif: slots: [] (200, bukan error)
+    if (activeSlots.length === 0) {
+      return res.json({
+        date: dateString,
+        serverNow: now.toISOString(),
+        leadMinutes: config.leadMinutes,
+        slots: [],
+      });
+    }
+
     // Ambil setting autoCancelEnabled
     const settings = await prisma.appSettings.findUnique({ where: { id: 1 } });
     const autoCancelEnabled = settings?.autoCancelEnabled ?? true;
-
-    // Hitung order yang menempati slot pada tanggal tersebut
-    // Termasuk: lunas, selesai, dan menunggu_bayar
-    const now = new Date();
-    const activeConditions: any[] = [
-      { status: "lunas" },
-      { status: "selesai" },
-      {
-        status: "menunggu_bayar",
-        paymentMethod: "midtrans",
-        holdExpiresAt: { gt: now },
-      },
-    ];
-
-    if (autoCancelEnabled) {
-      activeConditions.push({
-        status: "menunggu_bayar",
-        paymentMethod: "cod",
-        holdExpiresAt: { gt: now },
-      });
-    } else {
-      activeConditions.push({
-        status: "menunggu_bayar",
-        paymentMethod: "cod",
-      });
-    }
 
     const slotCounts = await prisma.order.groupBy({
       by: ["pickupSlot"],
       where: {
         pickupDate: { gte: dayStart, lte: dayEnd },
-        OR: activeConditions,
+        OR: slotBookingWhere(autoCancelEnabled, now),
       },
       _count: { _all: true },
     });
@@ -77,18 +58,14 @@ export const getSlots = async (req: Request, res: Response, next: NextFunction) 
       countMap[row.pickupSlot] = row._count._all;
     }
 
-    const allSlots = getPickupSlots();
-    const capacity = getSlotCapacity();
-    const leadMinutes = getPickupLeadMinutes();
-
-    const slots = allSlots.map((time) => {
-      const booked = countMap[time] || 0;
-      const available = Math.max(0, capacity - booked);
-      const isPast = isSlotPassed(dateString, time, now);
-      const isClosed = isSlotClosed(dateString, time, now, leadMinutes);
+    const slots = activeSlots.map((s) => {
+      const booked = countMap[s.time] || 0;
+      const available = Math.max(0, s.capacity - booked);
+      const isPast = isSlotPassed(dateString, s.time, now);
+      const isClosed = isSlotClosed(dateString, s.time, now, config.leadMinutes);
       return {
-        time,
-        capacity,
+        time: s.time,
+        capacity: s.capacity,
         booked,
         available,
         isPast,
@@ -97,7 +74,12 @@ export const getSlots = async (req: Request, res: Response, next: NextFunction) 
       };
     });
 
-    res.json({ date: dateString, serverNow: now.toISOString(), leadMinutes, slots });
+    res.json({
+      date: dateString,
+      serverNow: now.toISOString(),
+      leadMinutes: config.leadMinutes,
+      slots,
+    });
   } catch (err) {
     next(err);
   }

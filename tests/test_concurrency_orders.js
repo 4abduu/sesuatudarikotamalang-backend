@@ -16,10 +16,10 @@
  * Jalankan: node tests/test_concurrency_orders.js
  */
 require("./helpers/requireTestDb")();
-process.env.SLOT_CAPACITY = "3"; // eksplisit: tes ini menguji kapasitas 3
 
 const prisma = require("../dist/lib/prisma").default || require("../dist/lib/prisma");
 const { createOrder } = require("../dist/controllers/ordersController");
+const { snapshotSlots, restoreSlots, setAllCapacity } = require("./helpers/pickupSlots");
 
 const SLOTS = ["10:00", "11:00", "13:00", "15:00", "17:00"];
 
@@ -173,7 +173,10 @@ async function cleanup() {
   console.log("TES KONKURENSI createOrder (database test, kapasitas slot = 3)");
   console.log("==================================================");
   const outcomes = [];
+  let snapshot;
   try {
+    snapshot = await snapshotSlots(prisma);
+    await setAllCapacity(prisma, 3);
     outcomes.push(await test1());
     outcomes.push(await test2());
     outcomes.push(await test3());
@@ -182,6 +185,7 @@ async function cleanup() {
     outcomes.push(false);
   } finally {
     await cleanup();
+    if (snapshot) await restoreSlots(prisma, snapshot);
     await prisma.$disconnect();
   }
   const pass = outcomes.length === 3 && outcomes.every(Boolean);

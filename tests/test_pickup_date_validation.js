@@ -1,12 +1,11 @@
 require("./helpers/requireTestDb")();
 
-process.env.SLOT_CAPACITY = "1";
-
 const assert = require("assert");
 const prisma = require("../dist/lib/prisma").default || require("../dist/lib/prisma");
 const { createOrder } = require("../dist/controllers/ordersController");
 const { getSlots } = require("../dist/controllers/slotsController");
 const { toWibDateString, todayWibString } = require("../dist/lib/dates");
+const { snapshotSlots, restoreSlots, setAllCapacity } = require("./helpers/pickupSlots");
 
 const mockReqRes = (body, user) => {
   let statusCode = 200;
@@ -54,6 +53,9 @@ async function run() {
   invalidSlots.req.query = { date: "2026-99-99" };
   await getSlots(invalidSlots.req, invalidSlots.res, invalidSlots.next);
   assert.strictEqual(invalidSlots.response().statusCode, 400);
+
+  const snapshot = await snapshotSlots(prisma);
+  await setAllCapacity(prisma, 1);
 
   const timestamp = Date.now();
   const user = await prisma.user.create({
@@ -112,6 +114,7 @@ async function run() {
     await prisma.artisan.delete({ where: { id: artisan.id } });
     await prisma.category.delete({ where: { id: category.id } });
     await prisma.user.delete({ where: { id: user.id } });
+    await restoreSlots(prisma, snapshot);
   }
 
   console.log("LULUS  validasi tanggal pickup WIB, tanggal tersimpan, dan slot penuh");

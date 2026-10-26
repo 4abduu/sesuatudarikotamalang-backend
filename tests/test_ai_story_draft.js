@@ -33,6 +33,7 @@ function invoke(req) {
       isi: `Cerita ini lahir dari perjalanan kecil menyusuri sudut Kayutangan Heritage. Setiap garis dan warna menangkap suasana sore, ketika bangunan tua, jendela kayu, dan langkah warga bertemu dalam satu pemandangan yang akrab. Produk ini membawa pulang ingatan tentang kota dengan cara yang sederhana dan hangat.
 
 Prosesnya dikerjakan perlahan dengan perhatian pada detail. Inspirasi datang dari kebiasaan melihat kembali sudut-sudut Malang yang sering dilewati, lalu menerjemahkannya menjadi karya yang bisa dinikmati setiap hari. Tidak ada cerita besar yang dibuat-buat, hanya jejak kecil yang ingin dibagikan kepada siapa saja yang membawanya pulang.`,
+      proses: "Sketsa tangan dulu, lalu didigitalkan dan dicetak di kertas bertekstur.",
     });
     let mockResponse = {
       candidates: [{ content: { parts: [{ text: mockDraft }] } }],
