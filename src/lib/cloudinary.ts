@@ -77,4 +77,24 @@ export function uploadBuffer(
   });
 }
 
-export default { uploadBuffer, isOwnCloudinaryImageUrl };
+/**
+ * Hapus satu file dari Cloudinary.
+ * Hasil 'ok' atau 'not found' dianggap berhasil (idempoten).
+ * Error jaringan/API dilempar ke pemanggil.
+ */
+export async function deleteFromCloudinary(
+  publicId: string,
+  resourceType: string = "image"
+): Promise<void> {
+  ensureConfigured();
+  const result = await cloudinary.uploader.destroy(publicId, {
+    resource_type: resourceType as any,
+    invalidate: true,
+  });
+  // 'ok' = terhapus, 'not found' = sudah tidak ada — keduanya dianggap sukses
+  if (result.result !== "ok" && result.result !== "not found") {
+    throw new Error(`Cloudinary destroy gagal: ${result.result}`);
+  }
+}
+
+export default { uploadBuffer, deleteFromCloudinary, isOwnCloudinaryImageUrl };

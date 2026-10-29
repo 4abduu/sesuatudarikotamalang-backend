@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import prisma from "./prisma";
+import { normalizeBrandKey } from "./brandKey";
 
 export const OFFICIAL_STORE_NAME = "Sesuatu DariKota Malang";
 
@@ -26,6 +27,7 @@ export async function ensureOfficialStore(client: ArtisanClient = prisma) {
   const artisan = await client.artisan.create({
     data: {
       brandName: OFFICIAL_STORE_NAME,
+      brandKey: normalizeBrandKey(OFFICIAL_STORE_NAME),
       bio: OFFICIAL_STORE_BIO,
       status: "aktif",
       isOfficial: true,

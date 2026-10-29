@@ -6,6 +6,7 @@ import {
   getMyArtisanProfile as getMyArtisanProfileDal,
   updateMyArtisanProfile,
 } from "../dal/artisanProfile";
+import { presentArtisan } from "../lib/presentArtisan";
 
 // GET /api/artisans/applications/mine — Cek status pengajuan konsinyasi milik user yang login (Daftarkan sebelum /:id)
 export const getMyApplications = async (req: Request, res: Response, next: NextFunction) => {
@@ -29,8 +30,8 @@ export const updateMyProfile = async (req: Request, res: Response, next: NextFun
     }
 
     const updated = await updateMyArtisanProfile(req.user, req.body);
-
-    res.json({ message: "Profil kreator berhasil diperbarui", artisan: updated });
+    // owner: true → sertakan ownAvatarUrl
+    res.json({ message: "Profil kreator berhasil diperbarui", artisan: presentArtisan(updated, { owner: true }) });
   } catch (err) {
     next(err);
   }
@@ -44,10 +45,8 @@ export const getMyArtisanProfile = async (req: Request, res: Response, next: Nex
     }
 
     const artisan = await getMyArtisanProfileDal(req.user);
-
-    res.json({
-      artisan,
-    });
+    // owner: true → sertakan ownAvatarUrl
+    res.json({ artisan: presentArtisan(artisan, { owner: true }) });
   } catch (err) {
     next(err);
   }
@@ -60,6 +59,7 @@ export const listArtisans = async (req: Request, res: Response, next: NextFuncti
       where: { status: "aktif" },
       include: {
         products: { where: { isActive: true } },
+        user: { select: { avatarUrl: true } },
       },
     });
 
@@ -88,8 +88,9 @@ export const listArtisans = async (req: Request, res: Response, next: NextFuncti
     const artisansWithStats = artisans.map((a) => {
       const stats = artisanRatingMap[a.id];
       const avgRating = stats && stats.count > 0 ? Number((stats.sum / stats.count).toFixed(1)) : 0;
+      // Publik: tanpa ownAvatarUrl
       return {
-        ...a,
+        ...presentArtisan(a),
         productCount: a.products.length,
         avgRating,
       };
@@ -97,8 +98,8 @@ export const listArtisans = async (req: Request, res: Response, next: NextFuncti
 
     // Official Store tidak masuk daftar kreator; dikirim terpisah lewat field officialStore
     res.json({
-      artisans: artisansWithStats.filter((a) => !a.isOfficial),
-      officialStore: artisansWithStats.find((a) => a.isOfficial) ?? null,
+      artisans: artisansWithStats.filter((a) => !(a as any).isOfficial),
+      officialStore: artisansWithStats.find((a) => (a as any).isOfficial) ?? null,
     });
   } catch (err) {
     next(err);
@@ -115,6 +116,7 @@ export const getArtisanById = async (req: Request, res: Response, next: NextFunc
           where: { isActive: true },
           include: { story: true },
         },
+        user: { select: { avatarUrl: true } },
       },
     });
     if (!artisan) return res.status(404).json({ error: "Kreator tidak ditemukan atau sedang nonaktif" });
@@ -132,8 +134,9 @@ export const getArtisanById = async (req: Request, res: Response, next: NextFunc
       : 0;
 
     res.json({
+      // Publik: tanpa ownAvatarUrl
       artisan: {
-        ...artisan,
+        ...presentArtisan(artisan),
         productCount: artisan.products.length,
         avgRating,
       },
@@ -152,15 +155,16 @@ export const applyConsignment = async (req: Request, res: Response, next: NextFu
 
     const { applicantName, contact, brandName, categoryId, description, sampleFileUrl, samplePhotos } = req.body;
 
-    if (!applicantName || !contact || !brandName || !description) {
+    // brandName kini opsional (2.2: default ke users.name bila tidak diisi)
+    if (!applicantName || !contact || !description) {
       return res.status(400).json({
-        error: "applicantName, contact, brandName, dan description wajib diisi",
+        error: "applicantName, contact, dan description wajib diisi",
       });
     }
     const application = await createApplicationForUser(req.user, {
       applicantName,
       contact,
-      brandName,
+      brandName,       // boleh undefined/null/kosong
       categoryId,
       description,
       sampleFileUrl,

@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import prisma from "../lib/prisma";
 import { attachEffectiveStockToVariants } from "../lib/stock";
+import { presentArtisan } from "../lib/presentArtisan";
 
 // GET /api/search — Search produk dan kreator untuk mobile/customer (query: ?q=)
 export const search = async (req: Request, res: Response, next: NextFunction) => {
@@ -51,6 +52,7 @@ export const search = async (req: Request, res: Response, next: NextFunction) =>
         },
         include: {
           products: { where: { isActive: true } },
+          user: { select: { avatarUrl: true } },
         },
         orderBy: { createdAt: "desc" },
         take: 50,
@@ -115,8 +117,9 @@ export const search = async (req: Request, res: Response, next: NextFunction) =>
     const creatorsWithStats = creators.map((c) => {
       const stats = creatorRatingMap[c.id];
       const avgRating = stats && stats.count > 0 ? Number((stats.sum / stats.count).toFixed(1)) : 0;
+      // Publik: tanpa ownAvatarUrl
       return {
-        ...c,
+        ...presentArtisan(c),
         productCount: c.products.length,
         avgRating,
       };

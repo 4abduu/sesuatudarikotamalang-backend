@@ -597,6 +597,13 @@ export const updateProfile = async (req: Request, res: Response, next: NextFunct
       }
     }
 
+    // Baca avatarUrl lama sebelum update (untuk cleanup R3)
+    let oldAvatarUrl: string | null | undefined;
+    if (avatarUrl !== undefined) {
+      const current = await prisma.user.findUnique({ where: { id: req.user.id }, select: { avatarUrl: true } });
+      oldAvatarUrl = current?.avatarUrl;
+    }
+
     const updatedUser = await prisma.user.update({
       where: { id: req.user.id },
       data: updateData,
@@ -608,6 +615,13 @@ export const updateProfile = async (req: Request, res: Response, next: NextFunct
         avatarUrl: true,
       },
     });
+
+    // R3: hapus file lama bila URL-nya berubah (di luar transaksi, best effort)
+    if (oldAvatarUrl !== undefined) {
+      const { releaseUrls, removedUrls } = await import("../lib/uploadedFiles");
+      const toRelease = removedUrls(oldAvatarUrl, updatedUser.avatarUrl);
+      if (toRelease.length > 0) releaseUrls(toRelease).catch(() => {});
+    }
 
     res.json({ user: updatedUser });
   } catch (err) {

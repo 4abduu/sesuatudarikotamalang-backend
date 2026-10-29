@@ -4,6 +4,8 @@ import { getPickupConfig } from "../lib/slots";
 import { HttpError } from "../lib/httpError";
 import { computeRefund } from "../lib/refund";
 import { cancelOrderInTx } from "../dal/orders";
+import { normalizeBrandKey } from "../lib/brandKey";
+import { presentArtisan } from "../lib/presentArtisan";
 
 // GET /api/admin/dashboard — ringkasan statcard + data grafik dashboard admin
 export const getDashboard = async (req: Request, res: Response, next: NextFunction) => {
@@ -258,50 +260,70 @@ export const approveApplication = async (req: Request, res: Response, next: Next
     }
 
     // Jalankan transaksi atomic
-    const result = await prisma.$transaction(async (tx) => {
-      // 1. Buat profil Artisan jika belum ada
-      let artisan = await tx.artisan.findUnique({ where: { userId: application.userId } });
-      if (!artisan) {
-        artisan = await tx.artisan.create({
+    let result;
+    try {
+      result = await prisma.$transaction(async (tx) => {
+        // 1. Buat profil Artisan jika belum ada
+        let artisan = await tx.artisan.findUnique({ where: { userId: application.userId } });
+        if (!artisan) {
+          // Langkah 5: cek keunikan brandKey sebelum create (409 bila bentrok)
+          const newBrandKey = normalizeBrandKey(application.brandName);
+          const existing = await tx.artisan.findFirst({ where: { brandKey: newBrandKey }, select: { id: true } });
+          if (existing) {
+            throw new HttpError(
+              409,
+              "Nama brand pengajuan ini sudah dipakai kreator lain. Tolak pengajuan dengan alasan agar pemohon mengajukan ulang dengan nama brand lain.",
+              "BRAND_NAME_TAKEN"
+            );
+          }
+          artisan = await tx.artisan.create({
+            data: {
+              userId: application.userId,
+              brandName: application.brandName,
+              brandKey: newBrandKey,
+              status: "aktif",
+            },
+          });
+        }
+
+        // 2. Ubah role user jadi "creator" — tapi jangan turunkan admin
+        // F-19: Lindungi role admin agar tidak tertimpa
+        const targetUser = await tx.user.findUnique({ where: { id: application.userId } });
+        if (targetUser && targetUser.role !== "admin") {
+          await tx.user.update({
+            where: { id: application.userId },
+            data: { role: "creator" },
+          });
+        }
+
+        // 3. Update status ArtisanApplication -> "diterima"
+        const updatedApp = await tx.artisanApplication.update({
+          where: { id },
           data: {
-            userId: application.userId,
-            brandName: application.brandName,
-            status: "aktif",
+            status: "diterima",
+            decidedAt: new Date(),
           },
         });
-      }
 
-      // 2. Ubah role user jadi "creator" — tapi jangan turunkan admin
-      // F-19: Lindungi role admin agar tidak tertimpa
-      const targetUser = await tx.user.findUnique({ where: { id: application.userId } });
-      if (targetUser && targetUser.role !== "admin") {
-        await tx.user.update({
-          where: { id: application.userId },
-          data: { role: "creator" },
+        // 4. Kirim notifikasi in-app ke pengguna
+        await tx.notification.create({
+          data: {
+            userId: application.userId,
+            type: "pengajuan_diterima",
+            title: "Pengajuan Konsinyasi Diterima",
+            body: `Selamat! Pengajuan brand "${application.brandName}" kamu telah disetujui. Sekarang kamu dapat mengakses Dashboard Kreator dan mulai mengelola produkmu.`,
+          },
         });
+
+        return { application: updatedApp, artisan };
+      });
+    } catch (txErr: any) {
+      // Tangkap balapan P2002 dari artisan.create dan petakan ke 409
+      if ((txErr?.code === "P2002" && txErr?.meta?.target?.includes("brandKey")) || (txErr instanceof HttpError && txErr.status === 409)) {
+        return next(txErr instanceof HttpError ? txErr : new HttpError(409, "Nama brand sudah dipakai kreator lain. Pengajuan tetap pending.", "BRAND_NAME_TAKEN"));
       }
-
-      // 3. Update status ArtisanApplication -> "diterima"
-      const updatedApp = await tx.artisanApplication.update({
-        where: { id },
-        data: {
-          status: "diterima",
-          decidedAt: new Date(),
-        },
-      });
-
-      // 4. Kirim notifikasi in-app ke pengguna
-      await tx.notification.create({
-        data: {
-          userId: application.userId,
-          type: "pengajuan_diterima",
-          title: "Pengajuan Konsinyasi Diterima",
-          body: `Selamat! Pengajuan brand "${application.brandName}" kamu telah disetujui. Sekarang kamu dapat mengakses Dashboard Kreator dan mulai mengelola produkmu.`,
-        },
-      });
-
-      return { application: updatedApp, artisan };
-    });
+      throw txErr;
+    }
 
     res.json({
       message: "Pengajuan konsinyasi berhasil disetujui",
@@ -962,17 +984,11 @@ export const listAdminArtisans = async (req: Request, res: Response, next: NextF
     const artisansWithStats = artisans.map((a) => {
       const stats = ratingMap[a.id];
       const avgRating = stats && stats.count > 0 ? Number((stats.sum / stats.count).toFixed(1)) : 0;
+      // owner: true → sertakan ownAvatarUrl; avatarUrl efektif sudah dihitung presentArtisan
       return {
-        id: a.id,
-        userId: a.userId,
-        brandName: a.brandName,
-        bio: a.bio,
-        avatarUrl: a.avatarUrl,
-        status: a.status,
-        isOfficial: a.isOfficial,
-        createdAt: a.createdAt,
-        updatedAt: a.updatedAt,
-        user: a.user,
+        ...presentArtisan(a, { owner: true }),
+        // Sertakan kolom user yang dibutuhkan admin (bukan avatarUrl karena sudah diurus presentArtisan)
+        userInfo: a.user ? { id: a.user.id, name: a.user.name, email: a.user.email } : null,
         productCount: a.products.length,
         avgRating,
       };
@@ -1021,14 +1037,20 @@ export const listAdminProducts = async (req: Request, res: Response, next: NextF
       orderBy: { createdAt: "desc" },
       include: {
         category: true,
-        artisan: true,
+        artisan: { include: { user: { select: { avatarUrl: true } } } },
         variantOptions: true,
         variants: true,
         story: true,
       },
     });
 
-    res.json({ products });
+    // Terapkan foto efektif artisan sebelum dikembalikan
+    const presentedProducts = products.map((p) => ({
+      ...p,
+      artisan: p.artisan ? presentArtisan(p.artisan) : p.artisan,
+    }));
+
+    res.json({ products: presentedProducts });
   } catch (err) {
     next(err);
   }
@@ -1152,6 +1174,129 @@ export const listAdminReviews = async (req: Request, res: Response, next: NextFu
   }
 };
 
+// ---------------------------------------------------------------------------
+// GET /api/admin/users — Daftar pengguna (search, hasAvatar, role, pagination)
+// ---------------------------------------------------------------------------
+export const listAdminUsers = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { search, hasAvatar, role, page, limit } = req.query;
+
+    // Validasi query
+    if (search !== undefined && (typeof search !== "string" || search.length > 100)) {
+      return res.status(400).json({ error: "Parameter search harus berupa string maksimal 100 karakter" });
+    }
+    if (hasAvatar !== undefined && hasAvatar !== "true") {
+      return res.status(400).json({ error: "Parameter hasAvatar hanya menerima nilai \"true\"" });
+    }
+    if (role !== undefined && !["buyer", "creator", "admin"].includes(role as string)) {
+      return res.status(400).json({ error: "Parameter role tidak valid" });
+    }
+    const parsedPage = page !== undefined ? parseInt(page as string, 10) : 1;
+    const rawLimit = limit !== undefined ? parseInt(limit as string, 10) : 20;
+    if (isNaN(parsedPage) || parsedPage < 1) return res.status(400).json({ error: "page harus bilangan bulat positif" });
+    if (isNaN(rawLimit) || rawLimit < 1 || rawLimit > 100) return res.status(400).json({ error: "limit harus antara 1 sampai 100" });
+    const parsedLimit = Math.min(rawLimit, 100);
+
+    const where: any = {};
+    if (search) {
+      const q = (search as string).trim();
+      where.OR = [{ name: { contains: q } }, { email: { contains: q } }];
+    }
+    if (hasAvatar === "true") where.avatarUrl = { not: null };
+    if (role) where.role = role;
+
+    const total = await prisma.user.count({ where });
+    const users = await prisma.user.findMany({
+      where,
+      select: { id: true, name: true, email: true, role: true, avatarUrl: true, createdAt: true },
+      orderBy: { createdAt: "desc" },
+      skip: (parsedPage - 1) * parsedLimit,
+      take: parsedLimit,
+    });
+
+    res.json({
+      users,
+      pagination: { page: parsedPage, limit: parsedLimit, total, totalPages: Math.ceil(total / parsedLimit) },
+    });
+  } catch (err) { next(err); }
+};
+
+// ---------------------------------------------------------------------------
+// POST /api/admin/users/:id/reset-avatar — Moderasi foto profil pengguna
+// ---------------------------------------------------------------------------
+export const resetUserAvatar = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const rawReason = typeof req.body.reason === "string" ? req.body.reason.trim() : undefined;
+    if (rawReason !== undefined && rawReason === "") {
+      // kosong setelah trim = dianggap tidak ada reason
+    }
+    const reason = rawReason && rawReason.length > 0 ? rawReason : undefined;
+    if (reason !== undefined && reason.length > 200) {
+      return res.status(400).json({ error: "reason maksimal 200 karakter" });
+    }
+
+    const user = await prisma.user.findUnique({ where: { id } });
+    if (!user) return res.status(404).json({ error: "Pengguna tidak ditemukan", code: "NOT_FOUND" });
+    if (user.role === "admin") return res.status(403).json({ error: "Foto profil sesama admin tidak dapat dihapus lewat panel ini", code: "FORBIDDEN" });
+    if (!user.avatarUrl) return res.status(400).json({ error: "Pengguna tidak punya foto profil" });
+
+    const oldUrl = user.avatarUrl;
+
+    // Satu transaksi: set null + notifikasi
+    const notifBody = `Foto profilmu dihapus oleh admin karena tidak sesuai ketentuan.${ reason ? ` Alasan: ${reason}.` : "" } Kamu bisa mengunggah foto baru yang sesuai kapan saja.`;
+    const updatedUser = await prisma.$transaction(async (tx) => {
+      const u = await tx.user.update({ where: { id }, data: { avatarUrl: null }, select: { id: true, name: true, email: true, role: true, avatarUrl: true } });
+      await tx.notification.create({ data: { userId: id, type: "umum", title: "Foto profil dihapus oleh admin", body: notifBody } });
+      return u;
+    });
+
+    // R1-R3: hapus dari Cloudinary (best effort, di luar transaksi)
+    const { releaseUrls } = await import("../lib/uploadedFiles");
+    releaseUrls([oldUrl]).catch(() => {});
+
+    res.json({ message: "Foto profil pengguna dihapus", user: updatedUser });
+  } catch (err) { next(err); }
+};
+
+// ---------------------------------------------------------------------------
+// POST /api/admin/artisans/:id/reset-avatar — Moderasi foto profil toko kreator
+// ---------------------------------------------------------------------------
+export const resetArtisanAvatar = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const rawReason = typeof req.body.reason === "string" ? req.body.reason.trim() : undefined;
+    const reason = rawReason && rawReason.length > 0 ? rawReason : undefined;
+    if (reason !== undefined && reason.length > 200) {
+      return res.status(400).json({ error: "reason maksimal 200 karakter" });
+    }
+
+    const artisan = await prisma.artisan.findUnique({ where: { id }, include: { user: { select: { id: true } } } });
+    if (!artisan) return res.status(404).json({ error: "Kreator tidak ditemukan", code: "NOT_FOUND" });
+    if (artisan.isOfficial) return res.status(400).json({ error: "Foto profil Official Store tidak dapat dimoderasi", code: "OFFICIAL_STORE_PROTECTED" });
+    if (!artisan.avatarUrl) return res.status(400).json({ error: "Kreator tidak punya foto profil toko" });
+
+    const oldUrl = artisan.avatarUrl;
+
+    const notifTitle = "Foto profil toko dihapus oleh admin";
+    const notifBody = `Foto profil tokomu dihapus oleh admin karena tidak sesuai ketentuan.${ reason ? ` Alasan: ${reason}.` : "" } Kamu bisa mengunggah foto baru yang sesuai kapan saja.`;
+
+    const updatedArtisan = await prisma.$transaction(async (tx) => {
+      const a = await tx.artisan.update({ where: { id }, data: { avatarUrl: null } });
+      if (artisan.userId) {
+        await tx.notification.create({ data: { userId: artisan.userId, type: "umum", title: notifTitle, body: notifBody } });
+      }
+      return a;
+    });
+
+    // R1-R3: hapus dari Cloudinary (best effort)
+    const { releaseUrls } = await import("../lib/uploadedFiles");
+    releaseUrls([oldUrl]).catch(() => {});
+
+    res.json({ message: "Foto profil toko kreator dihapus", artisan: updatedArtisan });
+  } catch (err) { next(err); }
+};
+
 export default {
   getDashboard,
   listApplications,
@@ -1171,4 +1316,7 @@ export default {
   listAdminProducts,
   toggleProductActive,
   listAdminReviews,
+  listAdminUsers,
+  resetUserAvatar,
+  resetArtisanAvatar,
 };

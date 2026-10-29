@@ -101,10 +101,20 @@ export const changePasswordLimiter = rateLimit({
   message: { error: "Terlalu banyak percobaan ganti password. Silakan coba lagi nanti.", code: "RATE_LIMITED" },
 });
 
-/** Upload: maksimal 30 request per user per jam. */
+/** Batas unggahan per role per jam (buyer: 10, creator: 30, admin: 60). */
+export const UPLOAD_LIMIT_BUYER = 10;
+export const UPLOAD_LIMIT_CREATOR = 30;
+export const UPLOAD_LIMIT_ADMIN = 60;
+
+/** Upload: batas laju per user per jam, tergantung role (satu panggilan /multiple = satu hit). */
 export const uploadLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
-  max: 30,
+  max: (req: any) => {
+    const role = req.user?.role;
+    if (role === "admin") return UPLOAD_LIMIT_ADMIN;
+    if (role === "creator") return UPLOAD_LIMIT_CREATOR;
+    return UPLOAD_LIMIT_BUYER; // buyer atau role tak dikenal
+  },
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => req.user?.id ? `user:${req.user.id}` : `ip:${ipKeyGenerator(req.ip || "")}`,

@@ -60,18 +60,41 @@ async function runP3Tests() {
   // F-04: Upload Controller PUBLIC_BASE_URL Check
   // ═══════════════════════════════════════════
   console.log("\n[F-04] Uji PUBLIC_BASE_URL pada Upload Controller");
+  // Pastikan Cloudinary benar-benar belum terkonfigurasi saat controller dimuat,
+  // supaya hasil tes tidak bergantung pada isi .env mesin yang menjalankan.
+  const cloudinaryEnvKeys = ["CLOUDINARY_CLOUD_NAME", "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET", "CLOUDINARY_URL"];
+  const savedCloudinaryEnv = {};
+  for (const key of cloudinaryEnvKeys) {
+    savedCloudinaryEnv[key] = process.env[key];
+    delete process.env[key];
+  }
+  delete require.cache[require.resolve("../dist/lib/cloudinary")];
+  delete require.cache[require.resolve("../dist/controllers/uploadController")];
   const { uploadSingle } = require("../dist/controllers/uploadController");
 
+  // Permintaan yang SAH menurut aturan upload baru: sudah login dan isi berkas benar-benar PNG
+  // (byte awal diperiksa). Dengan begitu satu-satunya yang menghentikan permintaan adalah
+  // Cloudinary yang belum dikonfigurasi, yaitu yang memang diuji di sini.
+  const pngBuffer = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    Buffer.alloc(64),
+  ]);
   const mockReq = {
-    file: { originalname: "file-12345.png", buffer: Buffer.from("test"), size: 1024, mimetype: "image/png" },
+    file: { originalname: "file-12345.png", buffer: pngBuffer, size: pngBuffer.length, mimetype: "image/png" },
+    user: { id: "p3-test-user", role: "buyer" },
     get: () => "localhost:4000",
     protocol: "http",
   };
   const mockRes = {
     statusCode: 200,
     body: null,
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
     json(data) {
       this.body = data;
+      return this;
     },
   };
 
@@ -81,8 +104,14 @@ async function runP3Tests() {
   });
   testAssert(
     uploadError && uploadError.status === 503,
-    "Upload tanpa konfigurasi Cloudinary ditolak dengan status 503"
+    "Upload tanpa konfigurasi Cloudinary ditolak dengan status 503 " +
+      `(aktual: ${uploadError ? uploadError.status + " " + uploadError.message : "next() tidak dipanggil, res.statusCode=" + mockRes.statusCode + " body=" + JSON.stringify(mockRes.body)})`
   );
+
+  for (const key of cloudinaryEnvKeys) {
+    if (savedCloudinaryEnv[key] === undefined) delete process.env[key];
+    else process.env[key] = savedCloudinaryEnv[key];
+  }
 
   console.log("\n==================================================");
   console.log(`HASIL TES PAKET P3: ${passed}/${total} LULUS`);

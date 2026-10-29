@@ -15,6 +15,11 @@ const { getDashboard } = require("../dist/controllers/adminController");
 const { snapshotSlots, restoreSlots, setAllCapacity, ensureDefaultSlots } = require("./helpers/pickupSlots");
 const { todayWibString } = require("../dist/lib/dates");
 
+// Tanggal uji relatif (WIB): besok dan lusa. Tanggal tetap membuat tes gagal begitu tanggalnya lewat,
+// dan memakai "hari ini" membuat hasil tes bergantung pada jam saat tes dijalankan.
+const TEST_DATE = todayWibString(Date.now() + 24 * 3600 * 1000);
+const TEST_DATE_2 = todayWibString(Date.now() + 48 * 3600 * 1000);
+
 function mockReqRes(body = {}, user = null, params = {}, query = {}) {
   let statusCode = 200;
   let jsonResponse = null;
@@ -74,7 +79,7 @@ function mockReqRes(body = {}, user = null, params = {}, query = {}) {
       createdSlotId = r.jsonResponse.slot.id;
 
       // Cek di GET /slots publik
-      const pub = mockReqRes({}, null, {}, { date: "2026-10-28" });
+      const pub = mockReqRes({}, null, {}, { date: TEST_DATE });
       await getSlots(pub.req, pub.res, pub.next);
       const pubR = pub.response();
       assert.strictEqual(pubR.statusCode, 200);
@@ -191,7 +196,7 @@ function mockReqRes(body = {}, user = null, params = {}, query = {}) {
         paymentMethod: "cod",
         status: "lunas",
         totalAmount: 50000,
-        pickupDate: new Date("2026-10-28T00:00:00+07:00"),
+        pickupDate: new Date(TEST_DATE + "T00:00:00+07:00"),
         pickupSlot: "20:00",
       },
     });
@@ -202,14 +207,14 @@ function mockReqRes(body = {}, user = null, params = {}, query = {}) {
         paymentMethod: "cod",
         status: "lunas",
         totalAmount: 50000,
-        pickupDate: new Date("2026-10-28T00:00:00+07:00"),
+        pickupDate: new Date(TEST_DATE + "T00:00:00+07:00"),
         pickupSlot: "20:00",
       },
     });
 
     // 10. PATCH capacity turun di bawah booked mendatang tanpa confirm -> 409 CONFIRMATION_REQUIRED, dengan confirm: true -> 200
     {
-      // Saat ini ada 2 booked pada 2026-10-28. Coba turunkan kapasitas ke 1 tanpa confirm
+      // Saat ini ada 2 booked pada TEST_DATE. Coba turunkan kapasitas ke 1 tanpa confirm
       const t1 = mockReqRes({ capacity: 1 }, adminUser, { id: createdSlotId });
       await updateAdminPickupSlot(t1.req, t1.res, t1.next);
       const r1 = t1.response();
@@ -241,7 +246,7 @@ function mockReqRes(body = {}, user = null, params = {}, query = {}) {
       assert.strictEqual(t2.response().jsonResponse.slot.isActive, false);
 
       // Slot 20:00 hilang dari GET /slots
-      const pub = mockReqRes({}, null, {}, { date: "2026-10-28" });
+      const pub = mockReqRes({}, null, {}, { date: TEST_DATE });
       await getSlots(pub.req, pub.res, pub.next);
       assert.strictEqual(pub.response().jsonResponse.slots.some((s) => s.time === "20:00"), false);
       console.log("LULUS  11. PATCH isActive: false butuh confirm; setelah nonaktif hilang dari GET /slots");
@@ -328,7 +333,7 @@ function mockReqRes(body = {}, user = null, params = {}, query = {}) {
       await updateAdminPickupScheduleSettings(t.req, t.res, t.next);
       assert.strictEqual(t.response().statusCode, 200);
 
-      const pub = mockReqRes({}, null, {}, { date: "2026-10-28" });
+      const pub = mockReqRes({}, null, {}, { date: TEST_DATE });
       await getSlots(pub.req, pub.res, pub.next);
       assert.strictEqual(pub.response().jsonResponse.leadMinutes, 45);
       console.log("LULUS  21. PATCH settings leadMinutes=45 sukses dan terbaca di GET /slots");
@@ -338,7 +343,7 @@ function mockReqRes(body = {}, user = null, params = {}, query = {}) {
     {
       // createdSlotId (20:00) saat ini nonaktif
       const t = mockReqRes(
-        { productId: testProd.id, pickupDate: "2026-10-28", pickupSlot: "20:00", paymentMethod: "cod" },
+        { productId: testProd.id, pickupDate: TEST_DATE, pickupSlot: "20:00", paymentMethod: "cod" },
         testUser
       );
       await createOrder(t.req, t.res, t.next);
@@ -356,16 +361,16 @@ function mockReqRes(body = {}, user = null, params = {}, query = {}) {
       const uA2 = await prisma.user.create({ data: { name: `uA2-${stamp}`, email: `ua2-${stamp}@m.com`, passwordHash: "h" } });
       const uB1 = await prisma.user.create({ data: { name: `uB1-${stamp}`, email: `ub1-${stamp}@m.com`, passwordHash: "h" } });
 
-      const tA1 = mockReqRes({ productId: testProd.id, pickupDate: "2026-10-29", pickupSlot: "18:00", paymentMethod: "cod" }, uA1);
+      const tA1 = mockReqRes({ productId: testProd.id, pickupDate: TEST_DATE_2, pickupSlot: "18:00", paymentMethod: "cod" }, uA1);
       await createOrder(tA1.req, tA1.res, tA1.next);
       assert.strictEqual(tA1.response().statusCode, 201);
 
-      const tA2 = mockReqRes({ productId: testProd.id, pickupDate: "2026-10-29", pickupSlot: "18:00", paymentMethod: "cod" }, uA2);
+      const tA2 = mockReqRes({ productId: testProd.id, pickupDate: TEST_DATE_2, pickupSlot: "18:00", paymentMethod: "cod" }, uA2);
       await createOrder(tA2.req, tA2.res, tA2.next);
       assert.strictEqual(tA2.response().statusCode, 409);
       assert.strictEqual(tA2.response().jsonResponse.code, "SLOT_FULL");
 
-      const tB1 = mockReqRes({ productId: testProd.id, pickupDate: "2026-10-29", pickupSlot: "19:00", paymentMethod: "cod" }, uB1);
+      const tB1 = mockReqRes({ productId: testProd.id, pickupDate: TEST_DATE_2, pickupSlot: "19:00", paymentMethod: "cod" }, uB1);
       await createOrder(tB1.req, tB1.res, tB1.next);
       assert.strictEqual(tB1.response().statusCode, 201);
       console.log("LULUS  24. Kapasitas berbeda per slot: slot penuh ditolak 409 SLOT_FULL");
@@ -374,7 +379,7 @@ function mockReqRes(body = {}, user = null, params = {}, query = {}) {
     // 26. Semua slot nonaktif -> GET /slots = []
     {
       await prisma.pickupSlot.updateMany({ data: { isActive: false } });
-      const pub = mockReqRes({}, null, {}, { date: "2026-10-28" });
+      const pub = mockReqRes({}, null, {}, { date: TEST_DATE });
       await getSlots(pub.req, pub.res, pub.next);
       assert.strictEqual(pub.response().statusCode, 200);
       assert.strictEqual(pub.response().jsonResponse.slots.length, 0);

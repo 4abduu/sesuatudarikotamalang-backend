@@ -36,7 +36,7 @@ const req = (body, extra = {}) => ({ body, params: {}, query: {}, user: { id: "v
   await expect400(createProduct, req({ name: "x".repeat(192), description: "deskripsi", categoryId: "cat", price: 1 }), "createProduct name");
   await expect400(createProduct, req({ name: "Produk", description: "deskripsi", categoryId: "cat", price: 2147483648 }), "createProduct price overflow");
   await expect400(upsertStory, req({ title: "Judul", content: "isi", coverImageUrl: "http://bad.test/image.jpg" }, { params: { id: "product" }, user: { id: "creator", role: "creator" } }), "story URL");
-  await expect400(applyConsignment, req({ applicantName: "A", contact: "0812", brandName: "Brand", description: "desc", samplePhotos: ["https://a.test/1.jpg", "https://a.test/2.jpg", "https://a.test/3.jpg", "https://a.test/4.jpg", "https://a.test/5.jpg", "https://a.test/6.jpg" ] }), "apply foto");
+  await expect400(applyConsignment, req({ applicantName: "A", contact: "0812", brandName: "Brand", description: "desc", samplePhotos: ["https://a.test/1.jpg","https://a.test/2.jpg","https://a.test/3.jpg","https://a.test/4.jpg","https://a.test/5.jpg","https://a.test/6.jpg","https://a.test/7.jpg","https://a.test/8.jpg","https://a.test/9.jpg","https://a.test/10.jpg","https://a.test/11.jpg"] }), "apply foto");
   await expect400(listOrders, req({}, { query: { status: "status-salah" }, user: { id: "admin", role: "admin" } }), "admin status order");
   await expect400(extendOrderHold, req({ additionalMinutes: 2881 }, { params: { id: "order" }, user: { id: "admin", role: "admin" } }), "admin additionalMinutes");
   await expect400(rejectApplication, req({ reason: "x".repeat(501) }, { params: { id: "application" }, user: { id: "admin", role: "admin" } }), "admin reject reason");

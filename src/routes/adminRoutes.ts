@@ -70,4 +70,13 @@ router.post("/pickup-slots", pickupScheduleController.createAdminPickupSlot);
 router.patch("/pickup-slots/:id", pickupScheduleController.updateAdminPickupSlot);
 router.delete("/pickup-slots/:id", pickupScheduleController.deleteAdminPickupSlot);
 
+// GET /api/admin/users — Daftar pengguna dengan filter (search, hasAvatar, role, pagination)
+router.get("/users", adminController.listAdminUsers);
+
+// POST /api/admin/users/:id/reset-avatar — Moderasi: hapus foto profil pengguna
+router.post("/users/:id/reset-avatar", adminController.resetUserAvatar);
+
+// POST /api/admin/artisans/:id/reset-avatar — Moderasi: hapus foto profil toko kreator
+router.post("/artisans/:id/reset-avatar", adminController.resetArtisanAvatar);
+
 export default router;

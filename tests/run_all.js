@@ -65,7 +65,15 @@ const suites = [
   "test_refund_webhook.js",               // Langkah 5f: late settlement
   "test_pickup_slot_time.js",             // Slot pickup: hari yang sama, slot lewat, hari Minggu
   "test_pickup_schedule.js",              // Fase B: jadwal pickup database & endpoint admin
-  "step2_schema_check.js"
+  "step2_schema_check.js",
+  "test_upload_errors.js",               // Langkah 10: whitelist MIME, ukuran, batas laju, batas foto
+  "test_product_image_variants.js",      // Langkah 10: validateImageVariants, normalizeImageOrder, pruneImageVariants
+  "test_uploaded_files.js",              // Langkah 10: releaseUrls R2, purgeOrphanUploads R5, dal uploadedFiles
+  "test_admin_avatar_moderation.js",     // Langkah 10: listAdminUsers, resetUserAvatar, resetArtisanAvatar
+  "test_creator_application_flow.js",    // Langkah 10: samplePhotos batas 10, approve, reject, proteksi admin
+  "test_brand_name_unique.js",           // Profil Toko Langkah 7: normalisasi brandKey, 409 bentrok, 400 invalid, approve aman
+  "test_artisan_effective_avatar.js",    // Profil Toko Langkah 7: avatarUrl efektif, ownAvatarUrl hanya owner/admin
+  "test_artisan_bio.js",                 // Profil Toko Langkah 7: bio '' null spasi→null, 2000 OK, 2001 400, undefined tidak berubah
   // TIDAK dimasukkan: test_ai_integration.js (butuh server live + Gemini sungguhan)
   // TIDAK dimasukkan: test-cloudinary.js (butuh jaringan + kredensial Cloudinary)
 ];

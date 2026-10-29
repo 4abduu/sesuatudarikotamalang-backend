@@ -116,6 +116,7 @@ model User {
   reviews      Review[]
   notifications Notification[]
   otpCodes     OtpCode[]
+  uploadedFiles UploadedFile[]
 
   @@map("users")
 }
@@ -158,6 +159,7 @@ model Artisan {
   userId    String?       @unique
   user      User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
   brandName String
+  brandKey  String?       @unique // kunci ternormalisasi untuk deteksi duplikat (nullable agar data lama tetap valid; diisi backfill)
   bio       String?       @db.Text
   avatarUrl String?
   status    ArtisanStatus @default(aktif)
@@ -225,6 +227,7 @@ model Product {
   description      String   @db.Text
   price            Int // dalam Rupiah, tanpa desimal
   images           Json // array of string URL
+  imageVariants    Json? // [{url, option, value}] — foto tertaut ke nilai varian
   isLimited        Boolean  @default(false)
   isActive         Boolean  @default(true) // admin bisa nonaktifkan produk (mis. 6 bulan tidak laku) tanpa menghapusnya — riwayat order/review yang sudah ada tetap utuh
   soldCount        Int      @default(0)
@@ -450,4 +453,25 @@ model PickupSlot {
 
   @@index([isActive])
   @@map("pickup_slots")
+}
+
+// ----------------------------------------------------------------------------
+// PELACAKAN FILE CLOUDINARY
+// ----------------------------------------------------------------------------
+
+model UploadedFile {
+  id           String    @id @default(cuid())
+  publicId     String    @unique               // public_id dari Cloudinary
+  resourceType String    @db.VarChar(20)       // "image" / "raw" / "video"
+  url          String    @db.VarChar(500)      // secure_url dari Cloudinary
+  mimetype     String    @db.VarChar(100)
+  size         Int                             // ukuran dalam byte
+  uploadedById String?                         // null bila akun dihapus
+  uploadedBy   User?     @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  createdAt    DateTime  @default(now())
+
+  @@index([uploadedById])
+  @@index([createdAt])
+  @@index([url(length: 191)])
+  @@map("uploaded_files")
 }

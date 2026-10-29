@@ -9,6 +9,8 @@ import { shouldCountView } from "../lib/viewDedupe";
 import { HttpError } from "../lib/httpError";
 import { badRequest, notFound } from "../dal/errors";
 import { getOfficialArtisan } from "../lib/officialStore";
+import { validateImageVariants, normalizeImageOrder, pruneImageVariants } from "../lib/productImages";
+import { presentArtisan } from "../lib/presentArtisan";
 
 // Helper untuk membuat slug sederhana dari nama produk
 function createSlug(name: string): string {
@@ -25,6 +27,18 @@ function validateProductImages(images: unknown): string[] | null {
   if (!Array.isArray(images) || images.some((image) => !isHttpsUrl(image))) return null;
   return images;
 }
+
+/** Normalisasi respons produk: imageVariants selalu array (null → []); artisan dengan foto efektif. */
+function serializeProduct(product: any): any {
+  if (!product) return product;
+  const artisan = product.artisan ? presentArtisan(product.artisan) : product.artisan;
+  return { ...product, artisan, imageVariants: Array.isArray(product.imageVariants) ? product.imageVariants : [] };
+}
+
+/** Include artisan dengan user.avatarUrl untuk query produk (dipakai di semua findMany/findUnique yang perlu foto efektif). */
+const artisanWithAvatar = {
+  include: { user: { select: { avatarUrl: true } } },
+} as const;
 
 // GET /api/products — list semua produk aktif (dukung filter categoryId, search, sort)
 export const listProducts = async (req: Request, res: Response, next: NextFunction) => {
@@ -94,7 +108,7 @@ export const listProducts = async (req: Request, res: Response, next: NextFuncti
         : {}),
       include: {
         category: true,
-        artisan: true,
+        artisan: artisanWithAvatar,
         variantOptions: true,
         variants: true,
         story: true,
@@ -134,7 +148,7 @@ export const listProducts = async (req: Request, res: Response, next: NextFuncti
     }
     const productsWithStock = products.map((p) => {
       const stats = ratingMap[p.id] || { avgRating: 0, reviewCount: 0 };
-      return { ...p, avgRating: stats.avgRating, reviewCount: stats.reviewCount, variants: variantsByProduct.get(p.id) || [] };
+      return serializeProduct({ ...p, avgRating: stats.avgRating, reviewCount: stats.reviewCount, variants: variantsByProduct.get(p.id) || [] });
     });
 
     const responseData: any = { products: productsWithStock };
@@ -162,7 +176,7 @@ export const getProductById = async (req: Request, res: Response, next: NextFunc
       where: { id },
       include: {
         category: true,
-        artisan: true,
+        artisan: artisanWithAvatar,
         variantOptions: true,
         variants: true,
         story: true,
@@ -200,12 +214,12 @@ export const getProductById = async (req: Request, res: Response, next: NextFunc
       : 0;
 
     res.json({
-      product: {
+      product: serializeProduct({
         ...product,
         avgRating,
         reviewCount: totalReviews,
         variants: variantsWithStock,
-      },
+      }),
     });
   } catch (err) {
     next(err);
@@ -253,6 +267,10 @@ export const createProduct = async (req: Request, res: Response, next: NextFunct
     const parsedImages = validateProductImages(images);
     if (parsedImages === null) {
       return res.status(400).json({ error: "images harus berupa array URL HTTPS" });
+    }
+    // Batas maks 10 foto per produk (Langkah 6)
+    if (parsedImages.length > 10) {
+      return res.status(400).json({ error: "Foto produk maksimal 10" });
     }
     if (shopeeUrl !== undefined && shopeeUrl !== null && !isHttpsUrl(shopeeUrl)) {
       return res.status(400).json({ error: "shopeeUrl harus berupa URL HTTPS" });
@@ -306,6 +324,23 @@ export const createProduct = async (req: Request, res: Response, next: NextFunct
     }
 
     const slug = createSlug(name);
+
+    // Validasi imageVariants bila dikirim (rujukan: variantOptions di body)
+    const { imageVariants: rawImageVariants } = req.body;
+    let cleanImageVariants: ReturnType<typeof validateImageVariants> = [];
+    if (rawImageVariants !== undefined && rawImageVariants !== null) {
+      try {
+        cleanImageVariants = validateImageVariants(
+          rawImageVariants,
+          parsedImages,
+          Array.isArray(variantOptions) ? variantOptions : []
+        );
+      } catch (e: any) {
+        return res.status(400).json({ error: e.message });
+      }
+    }
+    const normalizedImages = normalizeImageOrder(parsedImages, cleanImageVariants);
+
     // Buat produk + variantOptions + variants dalam satu transaksi
     const newProduct = await prisma.$transaction(async (tx) => {
       const product = await tx.product.create({
@@ -317,7 +352,8 @@ export const createProduct = async (req: Request, res: Response, next: NextFunct
           shortDescription,
           description,
           price: parsedPrice,
-          images: parsedImages,
+          images: normalizedImages,
+          imageVariants: cleanImageVariants.length > 0 ? (cleanImageVariants as any) : undefined,
           isLimited: isLimited === true,
           shopeeUrl,
         },
@@ -388,11 +424,12 @@ export const createProduct = async (req: Request, res: Response, next: NextFunct
 
       return tx.product.findUnique({
         where: { id: product.id },
-        include: { category: true, artisan: true, variantOptions: true, variants: true },
+        include: { category: true, artisan: artisanWithAvatar, variantOptions: true, variants: true },
+
       });
     });
 
-    res.status(201).json({ product: newProduct });
+    res.status(201).json({ product: serializeProduct(newProduct) });
   } catch (err: any) {
     // HttpError diteruskan ke error handler global agar field `code` ikut terkirim
     if (err instanceof HttpError) {
@@ -422,6 +459,7 @@ export const updateProduct = async (req: Request, res: Response, next: NextFunct
       description,
       price,
       images,
+      imageVariants: rawImageVariants,
       isLimited,
       shopeeUrl,
       variantStocks, // array of { id: "variantId", stock: 15 }
@@ -462,6 +500,44 @@ export const updateProduct = async (req: Request, res: Response, next: NextFunct
       return res.status(400).json({ error: "shopeeUrl harus berupa URL HTTPS" });
     }
 
+    // Baca images + imageVariants lama sebelum update (untuk cleanup R3, R6)
+    let oldImages: unknown = undefined;
+    let currentImageVariants: any[] = [];
+    if (images !== undefined || rawImageVariants !== undefined) {
+      const currentProduct = await prisma.product.findUnique({ where: { id }, select: { images: true, imageVariants: true, variantOptions: true } });
+      if (images !== undefined) oldImages = currentProduct?.images;
+      currentImageVariants = Array.isArray(currentProduct?.imageVariants) ? currentProduct!.imageVariants as any[] : [];
+    }
+
+    // Hitung images akhir, imageVariants akhir, lalu normalize urutan (semantik PUT 2.5 nomor 6)
+    const finalImages = images !== undefined ? (Array.isArray(images) ? images : []) : undefined;
+    if (finalImages !== undefined && finalImages.length > 10) {
+      return res.status(400).json({ error: "Foto produk maksimal 10" });
+    }
+
+    // Hitung imageVariants akhir
+    let finalImageVariants: any[] | undefined = undefined;
+    if (rawImageVariants !== undefined) {
+      // Dikirim → validasi + ganti seluruh tautan (termasuk [] yang melepas semua)
+      const currentProduct2 = await prisma.product.findUnique({ where: { id }, select: { variantOptions: true } });
+      try {
+        finalImageVariants = validateImageVariants(
+          rawImageVariants,
+          finalImages ?? (Array.isArray(oldImages) ? oldImages as string[] : []),
+          (currentProduct2?.variantOptions ?? []) as any[]
+        );
+      } catch (e: any) {
+        return res.status(400).json({ error: e.message });
+      }
+    } else if (finalImages !== undefined) {
+      // images dikirim tanpa imageVariants → prune tautan yang URL-nya hilang
+      finalImageVariants = pruneImageVariants(currentImageVariants, finalImages);
+    }
+
+    const normalizedImages = finalImages !== undefined
+      ? normalizeImageOrder(finalImages, finalImageVariants ?? currentImageVariants)
+      : undefined;
+
     const updated = await prisma.$transaction(async (tx) => {
       // Update data produk dasar
       await tx.product.update({
@@ -472,7 +548,8 @@ export const updateProduct = async (req: Request, res: Response, next: NextFunct
           ...(shortDescription !== undefined && { shortDescription }),
           ...(description && { description }),
           ...(price !== undefined && { price: typeof price === "number" ? price : Number(price) }),
-          ...(images && { images: Array.isArray(images) ? images : [] }),
+          ...(normalizedImages !== undefined && { images: normalizedImages }),
+          ...(finalImageVariants !== undefined && { imageVariants: finalImageVariants.length > 0 ? (finalImageVariants as any) : null }),
           ...(isLimited !== undefined && { isLimited }),
           ...(shopeeUrl !== undefined && { shopeeUrl }),
         },
@@ -500,11 +577,19 @@ export const updateProduct = async (req: Request, res: Response, next: NextFunct
 
       return tx.product.findUnique({
         where: { id },
-        include: { category: true, artisan: true, variantOptions: true, variants: true, story: true },
+        include: { category: true, artisan: artisanWithAvatar, variantOptions: true, variants: true, story: true },
+
       });
     });
 
-    res.json({ product: updated });
+    // R3: hapus foto produk lama yang keluar dari daftar (di luar transaksi, best effort)
+    if (oldImages !== undefined && finalImages !== undefined) {
+      const { releaseUrls, removedUrls } = await import("../lib/uploadedFiles");
+      const toRelease = removedUrls(oldImages, finalImages);
+      if (toRelease.length > 0) releaseUrls(toRelease).catch(() => {});
+    }
+
+    res.json({ product: serializeProduct(updated) });
   } catch (err) {
     next(err);
   }
@@ -557,6 +642,9 @@ export const upsertStory = async (req: Request, res: Response, next: NextFunctio
 
     await getEditableProduct(req.user, id);
 
+    // Baca nilai lama sebelum upsert (untuk cleanup)
+    const existingStory = await prisma.productStory.findUnique({ where: { productId: id }, select: { coverImageUrl: true, processImages: true } });
+
     const story = await prisma.productStory.upsert({
       where: { productId: id },
       create: {
@@ -564,17 +652,28 @@ export const upsertStory = async (req: Request, res: Response, next: NextFunctio
         title,
         content,
         process: typeof process === "string" ? process : null,
-        coverImageUrl,
+        coverImageUrl: coverImageUrl ?? null,
         processImages: Array.isArray(processImages) ? processImages : [],
       },
       update: {
         title,
         content,
-        process: process === undefined ? undefined : process,
-        coverImageUrl,
-        processImages: Array.isArray(processImages) ? processImages : [],
+        // Perbaikan bug: hanya ganti bila dikirim; undefined = tidak berubah (R5.2.01)
+        ...(process !== undefined && { process }),
+        ...(coverImageUrl !== undefined && { coverImageUrl }),
+        ...(processImages !== undefined && { processImages: Array.isArray(processImages) ? processImages : [] }),
       },
     });
+
+    // R3: hapus foto cerita lama yang berubah (di luar transaksi, best effort)
+    if (existingStory) {
+      const { releaseUrls, removedUrls } = await import("../lib/uploadedFiles");
+      const toRelease = [
+        ...(coverImageUrl !== undefined ? removedUrls(existingStory.coverImageUrl, story.coverImageUrl) : []),
+        ...(processImages !== undefined ? removedUrls(existingStory.processImages, story.processImages) : []),
+      ];
+      if (toRelease.length > 0) releaseUrls(toRelease).catch(() => {});
+    }
 
     res.json({ story });
   } catch (err) {
@@ -631,7 +730,7 @@ export const listMyProducts = async (req: Request, res: Response, next: NextFunc
     const productsWithStock = products.map((p) => {
       const stats = ratingMap[p.id] || { avgRating: 0, reviewCount: 0 };
       const variants = allVariantsWithStock.filter((variant) => p.variants.some((item) => item.id === variant.id));
-      return { ...p, avgRating: stats.avgRating, reviewCount: stats.reviewCount, variants };
+      return serializeProduct({ ...p, avgRating: stats.avgRating, reviewCount: stats.reviewCount, variants });
     });
 
     res.json({ products: productsWithStock });
