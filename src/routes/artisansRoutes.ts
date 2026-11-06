@@ -1,6 +1,8 @@
 import express from "express";
 import { requireAuth } from "../middleware/authMiddleware";
+import { requireRole } from "../middleware/requireRole";
 import artisansController from "../controllers/artisansController";
+import reportController from "../controllers/reportController";
 
 const router = express.Router();
 
@@ -12,6 +14,8 @@ router.put("/mine", requireAuth, artisansController.updateMyProfile);
 
 // GET /api/artisans/mine — A4: Profil kreator milik user yang sedang login (sebelum /:id)
 router.get("/mine", requireAuth, artisansController.getMyArtisanProfile);
+router.get("/mine/reports", requireAuth, requireRole("creator"), reportController.listMyReports);
+router.get("/mine/reports/:month", requireAuth, requireRole("creator"), reportController.getMyReport);
 
 // GET /api/artisans — daftar kreator aktif
 router.get("/", artisansController.listArtisans);

@@ -3,6 +3,10 @@ import { requireAuth } from "../middleware/authMiddleware";
 import { requireRole } from "../middleware/requireRole";
 import adminController from "../controllers/adminController";
 import pickupScheduleController from "../controllers/pickupScheduleController";
+import pickupHolidayController from "../controllers/pickupHolidayController";
+import stockController from "../controllers/stockController";
+import slowMoverController from "../controllers/slowMoverController";
+import reportController from "../controllers/reportController";
 
 const router = express.Router();
 
@@ -53,9 +57,15 @@ router.patch("/artisans/:id/toggle-status", adminController.toggleArtisanStatus)
 
 // GET /api/admin/artisans — A5: Daftar seluruh kreator (status, productCount, avgRating)
 router.get("/artisans", adminController.listAdminArtisans);
+router.patch("/artisans/:id/revenue-share", adminController.updateArtisanRevenueShare);
 
 // GET /api/admin/products — A5: Daftar seluruh produk (termasuk nonaktif)
 router.get("/products", adminController.listAdminProducts);
+router.get("/products/approvals", adminController.listProductApprovals);
+router.post("/products/:id/approve", adminController.approveProduct);
+router.post("/products/:id/reject", adminController.rejectProduct);
+router.post("/products/:id/hide", adminController.hideProduct);
+router.post("/products/:id/withdraw", adminController.withdrawProduct);
 
 // PATCH /api/admin/products/:id/active — A5: Toggle status aktif/nonaktif produk
 router.patch("/products/:id/active", adminController.toggleProductActive);
@@ -69,6 +79,17 @@ router.patch("/pickup-schedule/settings", pickupScheduleController.updateAdminPi
 router.post("/pickup-slots", pickupScheduleController.createAdminPickupSlot);
 router.patch("/pickup-slots/:id", pickupScheduleController.updateAdminPickupSlot);
 router.delete("/pickup-slots/:id", pickupScheduleController.deleteAdminPickupSlot);
+
+router.get("/pickup-holidays", pickupHolidayController.listAdminHolidays);
+router.put("/pickup-holidays/weekly", pickupHolidayController.updateWeeklyHolidays);
+router.post("/pickup-holidays", pickupHolidayController.createHoliday);
+router.delete("/pickup-holidays/:id", pickupHolidayController.deleteHoliday);
+router.post("/stock/adjust", stockController.adjustStock);
+router.get("/stock/movements", stockController.listStockMovements);
+router.get("/products/slow-movers", slowMoverController.listSlowMovers);
+router.get("/reports/monthly", reportController.getMonthlyReport);
+router.post("/reports/monthly/:month/finalize", reportController.finalizeMonthlyReport);
+router.post("/reports/monthly/:month/reopen", reportController.reopenMonthlyReport);
 
 // GET /api/admin/users — Daftar pengguna dengan filter (search, hasAvatar, role, pagination)
 router.get("/users", adminController.listAdminUsers);

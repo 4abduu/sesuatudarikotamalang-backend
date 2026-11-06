@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import crypto from "crypto";
 import prisma from "../lib/prisma";
 import { cartesianProduct } from "../lib/variants";
-import { attachEffectiveStockToVariants } from "../lib/stock";
+import { applyStockChange, attachEffectiveStockToVariants } from "../lib/stock";
 import { getEditableProduct } from "../dal/productOwnership";
 import { isHttpsUrl, isString } from "../lib/validate";
 import { shouldCountView } from "../lib/viewDedupe";
@@ -11,6 +11,7 @@ import { badRequest, notFound } from "../dal/errors";
 import { getOfficialArtisan } from "../lib/officialStore";
 import { validateImageVariants, normalizeImageOrder, pruneImageVariants } from "../lib/productImages";
 import { presentArtisan } from "../lib/presentArtisan";
+import { serializeProductStatus } from "../lib/productStatus";
 
 // Helper untuk membuat slug sederhana dari nama produk
 function createSlug(name: string): string {
@@ -32,7 +33,7 @@ function validateProductImages(images: unknown): string[] | null {
 function serializeProduct(product: any): any {
   if (!product) return product;
   const artisan = product.artisan ? presentArtisan(product.artisan) : product.artisan;
-  return { ...product, artisan, imageVariants: Array.isArray(product.imageVariants) ? product.imageVariants : [] };
+  return serializeProductStatus({ ...product, artisan, imageVariants: Array.isArray(product.imageVariants) ? product.imageVariants : [] });
 }
 
 /** Include artisan dengan user.avatarUrl untuk query produk (dipakai di semua findMany/findUnique yang perlu foto efektif). */
@@ -63,6 +64,7 @@ export const listProducts = async (req: Request, res: Response, next: NextFuncti
 
     const where: any = {
       isActive: true,
+      approvalStatus: "disetujui",
       artisan: { status: "aktif" },
     };
 
@@ -172,8 +174,8 @@ export const getProductById = async (req: Request, res: Response, next: NextFunc
   try {
     const { id } = req.params;
 
-    const product = await prisma.product.findUnique({
-      where: { id },
+    const product = await prisma.product.findFirst({
+      where: { id, isActive: true, approvalStatus: "disetujui" },
       include: {
         category: true,
         artisan: artisanWithAvatar,
@@ -194,7 +196,7 @@ export const getProductById = async (req: Request, res: Response, next: NextFunc
       },
     });
 
-    if (!product || !product.isActive || product.artisan.status !== "aktif") {
+    if (!product || product.artisan.status !== "aktif") {
       return res.status(404).json({ error: "Produk tidak ditemukan atau tidak aktif" });
     }
 
@@ -244,6 +246,7 @@ export const createProduct = async (req: Request, res: Response, next: NextFunct
       shopeeUrl,
       variantOptions, // array of { name: "Motif", values: ["Ubin", "Sulur"] }
       variantStocks,  // opsional: array of { combination: ["Ubin"], stock: 10 }
+      replacesProductId,
     } = req.body;
 
     const parsedPrice = typeof price === "number" && Number.isInteger(price)
@@ -260,6 +263,9 @@ export const createProduct = async (req: Request, res: Response, next: NextFunct
     }
     if (typeof categoryId !== "string" || !categoryId) {
       return res.status(400).json({ error: "categoryId wajib berupa string" });
+    }
+    if (replacesProductId !== undefined && typeof replacesProductId !== "string") {
+      return res.status(400).json({ error: "replacesProductId harus berupa string", code: "INVALID_REPLACEMENT" });
     }
     if (isLimited !== undefined && typeof isLimited !== "boolean") {
       return res.status(400).json({ error: "isLimited harus berupa boolean" });
@@ -323,6 +329,13 @@ export const createProduct = async (req: Request, res: Response, next: NextFunct
       artisanId = artisan.id;
     }
 
+    if (replacesProductId !== undefined) {
+      const replacement = await prisma.product.findUnique({ where: { id: replacesProductId } });
+      if (!replacement || replacement.artisanId !== artisanId || !replacement.withdrawnAt) {
+        return res.status(400).json({ error: "Produk pengganti harus milik kreator yang sama dan sudah ditarik", code: "INVALID_REPLACEMENT" });
+      }
+    }
+
     const slug = createSlug(name);
 
     // Validasi imageVariants bila dikirim (rujukan: variantOptions di body)
@@ -346,6 +359,8 @@ export const createProduct = async (req: Request, res: Response, next: NextFunct
       const product = await tx.product.create({
         data: {
           artisanId,
+          approvalStatus: req.user!.role === "creator" ? "menunggu" : "disetujui",
+          ...(replacesProductId !== undefined && { replacesProductId }),
           categoryId,
           name,
           slug,
@@ -413,13 +428,14 @@ export const createProduct = async (req: Request, res: Response, next: NextFunct
           }
         }
 
-        await tx.productVariant.create({
+        const createdVariant = await tx.productVariant.create({
           data: {
             productId: product.id,
             combination: combo,
-            stock,
+            stock: 0,
           },
         });
+        if (stock > 0) await applyStockChange(tx, { productId: product.id, variantId: createdVariant.id, delta: stock, reason: "barang_masuk", note: "Stok awal", actorId: req.user?.id });
       }
 
       return tx.product.findUnique({
@@ -450,7 +466,7 @@ export const updateProduct = async (req: Request, res: Response, next: NextFunct
     }
 
     const { id } = req.params;
-    await getEditableProduct(req.user, id);
+    const editableProduct = await getEditableProduct(req.user, id);
 
     const {
       name,
@@ -543,6 +559,7 @@ export const updateProduct = async (req: Request, res: Response, next: NextFunct
       await tx.product.update({
         where: { id },
         data: {
+          ...(req.user!.role === "creator" && editableProduct.approvalStatus === "ditolak" ? { approvalStatus: "menunggu", statusNote: null } : {}),
           ...(name && { name }),
           ...(categoryId && { categoryId }),
           ...(shortDescription !== undefined && { shortDescription }),
@@ -564,13 +581,12 @@ export const updateProduct = async (req: Request, res: Response, next: NextFunct
             if (!Number.isInteger(parsed) || parsed < 0) {
               throw { status: 400, message: "Nilai stok varian harus berupa angka bulat non-negatif" };
             }
-            const result = await tx.productVariant.updateMany({
-              where: { id: vs.id, productId: id },
-              data: { stock: parsed },
-            });
-            if (result.count !== 1) {
+            const currentVariant = await tx.productVariant.findFirst({ where: { id: vs.id, productId: id } });
+            if (!currentVariant) {
               throw { status: 404, message: "Varian tidak ditemukan pada produk ini" };
             }
+            const delta = parsed - currentVariant.stock;
+            if (delta !== 0) await applyStockChange(tx, { productId: id, variantId: vs.id, delta, reason: "koreksi", actorId: req.user?.id });
           }
         }
       }
@@ -599,10 +615,9 @@ export const updateProduct = async (req: Request, res: Response, next: NextFunct
 export const deleteProduct = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
-    const existing = await prisma.product.findUnique({ where: { id } });
-
-    if (!existing) {
-      return res.status(404).json({ error: "Produk tidak ditemukan" });
+    const existing = await getEditableProduct(req.user!, id);
+    if (req.user?.role === "creator" && existing.withdrawnAt) {
+      throw new HttpError(403, "Produk yang sudah ditarik tidak dapat dihapus", "PRODUCT_LOCKED");
     }
 
     // Soft delete dengan menonaktifkan produk
@@ -611,7 +626,7 @@ export const deleteProduct = async (req: Request, res: Response, next: NextFunct
       data: { isActive: false },
     });
 
-    res.json({ message: "Produk berhasil dinonaktifkan (soft delete)" });
+    res.json({ message: "Produk berhasil dinonaktifkan (soft delete)", product: serializeProductStatus({ ...existing, isActive: false }) });
   } catch (err) {
     next(err);
   }

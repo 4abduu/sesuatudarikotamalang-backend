@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import prisma from "../lib/prisma";
 import { getPickupConfig, slotBookingWhere, isSlotPassed, isSlotClosed } from "../lib/slots";
 import { toWibDateString } from "../lib/dates";
+import { holidayInfoFor, loadHolidayContext } from "../lib/holidays";
 
 /**
  * GET /api/slots?date=YYYY-MM-DD
@@ -27,15 +28,18 @@ export const getSlots = async (req: Request, res: Response, next: NextFunction) 
 
     const config = await getPickupConfig();
     const activeSlots = config.slots.filter((s) => s.isActive);
+    const holidayContext = await loadHolidayContext(prisma, dateString, dateString);
+    const holiday = holidayInfoFor(dateString, holidayContext);
 
     const now = new Date();
 
     // Bila tidak ada slot aktif: slots: [] (200, bukan error)
-    if (activeSlots.length === 0) {
+    if (activeSlots.length === 0 || holiday) {
       return res.json({
         date: dateString,
         serverNow: now.toISOString(),
         leadMinutes: config.leadMinutes,
+        holiday,
         slots: [],
       });
     }
@@ -78,6 +82,7 @@ export const getSlots = async (req: Request, res: Response, next: NextFunction) 
       date: dateString,
       serverNow: now.toISOString(),
       leadMinutes: config.leadMinutes,
+      holiday,
       slots,
     });
   } catch (err) {

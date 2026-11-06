@@ -6,6 +6,8 @@ import { computeRefund } from "../lib/refund";
 import { cancelOrderInTx } from "../dal/orders";
 import { normalizeBrandKey } from "../lib/brandKey";
 import { presentArtisan } from "../lib/presentArtisan";
+import { addHolidayFields } from "../lib/holidays";
+import { serializeProductStatus } from "../lib/productStatus";
 
 // GET /api/admin/dashboard — ringkasan statcard + data grafik dashboard admin
 export const getDashboard = async (req: Request, res: Response, next: NextFunction) => {
@@ -23,6 +25,8 @@ export const getDashboard = async (req: Request, res: Response, next: NextFuncti
     ));
     const sevenDaysAgoUTC = new Date(sevenDaysAgoWIB.getTime() - WIB_OFFSET_MS);
 
+    const dashboardSettings = await prisma.appSettings.findUnique({ where: { id: 1 } });
+    const lowStockThreshold = dashboardSettings?.lowStockThreshold ?? 5;
     const [
       ordersToday,
       readyForPickup,
@@ -50,14 +54,14 @@ export const getDashboard = async (req: Request, res: Response, next: NextFuncti
       // 4. Stok menipis (<6 pcs) HANYA untuk produk aktif
       prisma.productVariant.count({
         where: {
-          stock: { lt: 6 },
+          stock: { lte: lowStockThreshold },
           product: { isActive: true },
         },
       }),
       // 4b. Daftar varian stok menipis (maks 10, terendah dulu) untuk kartu "Perlu Restock"
       prisma.productVariant.findMany({
         where: {
-          stock: { lt: 6 },
+          stock: { lte: lowStockThreshold },
           product: { isActive: true },
         },
         orderBy: { stock: "asc" },
@@ -472,7 +476,7 @@ export const listOrders = async (req: Request, res: Response, next: NextFunction
       },
     });
 
-    const responseData: any = { orders };
+    const responseData: any = { orders: await addHolidayFields(orders) };
     if (parsedPage !== undefined && parsedLimit !== undefined && total !== undefined) {
       responseData.pagination = {
         page: parsedPage,
@@ -571,6 +575,7 @@ export const updateOrderStatus = async (req: Request, res: Response, next: NextF
         where: { id },
         data: {
           status,
+          ...(status === "selesai" && oldStatus !== "selesai" ? { completedAt: new Date() } : {}),
           ...(pickupDeadline && { pickupDeadline }),
         },
       });
@@ -601,7 +606,8 @@ export const updateOrderStatus = async (req: Request, res: Response, next: NextF
       return updated;
     });
 
-    res.json({ message: "Status pesanan berhasil diperbarui", order: updatedOrder });
+    const [decoratedOrder] = await addHolidayFields([updatedOrder]);
+    res.json({ message: "Status pesanan berhasil diperbarui", order: decoratedOrder });
   } catch (err: any) {
     if (err instanceof HttpError) {
       return next(err);
@@ -642,7 +648,8 @@ export const markOrderRefunded = async (req: Request, res: Response, next: NextF
       return updated;
     });
 
-    res.json({ message: "Refund ditandai selesai", order: result });
+    const [decoratedOrder] = await addHolidayFields([result]);
+    res.json({ message: "Refund ditandai selesai", order: decoratedOrder });
   } catch (err) {
     next(err);
   }
@@ -690,9 +697,10 @@ export const extendOrderHold = async (req: Request, res: Response, next: NextFun
       },
     });
 
+    const [decoratedOrder] = await addHolidayFields([updatedOrder]);
     res.json({
       message: `Waktu hold berhasil diperpanjang ${additionalMinutes} menit`,
-      order: updatedOrder,
+      order: decoratedOrder,
     });
   } catch (err) {
     next(err);
@@ -751,7 +759,7 @@ export const verifyScanQr = async (req: Request, res: Response, next: NextFuncti
 
         const updated = await tx.order.update({
           where: { id: order.id },
-          data: { status: "selesai" },
+          data: { status: "selesai", completedAt: new Date() },
           include: {
             user: { select: { id: true, name: true, email: true } },
             items: { include: { product: true, variant: true } },
@@ -773,9 +781,10 @@ export const verifyScanQr = async (req: Request, res: Response, next: NextFuncti
       { isolationLevel: "ReadCommitted" }
     );
 
+    const [decoratedOrder] = await addHolidayFields([updatedOrder]);
     res.json({
       message: "Verifikasi pickup berhasil! Pesanan telah ditandai Selesai",
-      order: updatedOrder,
+      order: decoratedOrder,
     });
   } catch (err: any) {
     if (err.status) {
@@ -792,7 +801,7 @@ export const getSettings = async (req: Request, res: Response, next: NextFunctio
     if (!settings) {
       settings = await prisma.appSettings.create({ data: { id: 1 } });
     }
-    res.json({ settings });
+    res.json({ settings: { ...settings, defaultCreatorSharePercent: Number(settings.defaultCreatorSharePercent) } });
   } catch (err) {
     next(err);
   }
@@ -801,7 +810,7 @@ export const getSettings = async (req: Request, res: Response, next: NextFunctio
 // PUT /api/admin/settings — Update pengaturan sistem (AppSettings)
 export const updateSettings = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { holdDurationMinutes, autoCancelEnabled, pickupDeadlineDays, whatsappAdminNumber, notificationEmail, refundWindowDays } = req.body;
+    const { holdDurationMinutes, autoCancelEnabled, pickupDeadlineDays, whatsappAdminNumber, notificationEmail, refundWindowDays, lowStockThreshold, defaultCreatorSharePercent } = req.body;
 
     // F-23: Validasi rentang angka
     let parsedHold: number | undefined = undefined;
@@ -843,6 +852,8 @@ export const updateSettings = async (req: Request, res: Response, next: NextFunc
       (typeof notificationEmail !== "string" || notificationEmail.length > 191 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(notificationEmail))) {
       return res.status(400).json({ error: "notificationEmail harus berupa email valid maksimal 191 karakter atau null" });
     }
+    if (lowStockThreshold !== undefined && (!Number.isInteger(lowStockThreshold) || lowStockThreshold < 1 || lowStockThreshold > 100)) return res.status(400).json({ error: "lowStockThreshold harus berupa bilangan bulat 1 sampai 100" });
+    if (defaultCreatorSharePercent !== undefined && (typeof defaultCreatorSharePercent !== "number" || !Number.isFinite(defaultCreatorSharePercent) || defaultCreatorSharePercent < 0 || defaultCreatorSharePercent > 100 || !/^\d+(\.\d{1,2})?$/.test(String(defaultCreatorSharePercent)))) return res.status(400).json({ error: "defaultCreatorSharePercent harus berupa angka 0 sampai 100 dengan maksimal 2 desimal" });
 
     const settings = await prisma.appSettings.upsert({
       where: { id: 1 },
@@ -854,6 +865,8 @@ export const updateSettings = async (req: Request, res: Response, next: NextFunc
         ...(whatsappAdminNumber !== undefined && { whatsappAdminNumber }),
         ...(notificationEmail !== undefined && { notificationEmail }),
         ...(parsedRefundWindow !== undefined && { refundWindowDays: parsedRefundWindow }),
+        ...(lowStockThreshold !== undefined && { lowStockThreshold }),
+        ...(defaultCreatorSharePercent !== undefined && { defaultCreatorSharePercent }),
       },
       update: {
         ...(parsedHold !== undefined && { holdDurationMinutes: parsedHold }),
@@ -862,10 +875,12 @@ export const updateSettings = async (req: Request, res: Response, next: NextFunc
         ...(whatsappAdminNumber !== undefined && { whatsappAdminNumber }),
         ...(notificationEmail !== undefined && { notificationEmail }),
         ...(parsedRefundWindow !== undefined && { refundWindowDays: parsedRefundWindow }),
+        ...(lowStockThreshold !== undefined && { lowStockThreshold }),
+        ...(defaultCreatorSharePercent !== undefined && { defaultCreatorSharePercent }),
       },
     });
 
-    res.json({ message: "Pengaturan sistem berhasil diperbarui", settings });
+    res.json({ message: "Pengaturan sistem berhasil diperbarui", settings: { ...settings, defaultCreatorSharePercent: Number(settings.defaultCreatorSharePercent) } });
   } catch (err) {
     next(err);
   }
@@ -981,12 +996,16 @@ export const listAdminArtisans = async (req: Request, res: Response, next: NextF
       ratingMap[aId].count += 1;
     }
 
+    const settings = await prisma.appSettings.findUnique({ where: { id: 1 } });
+    const defaultShare = Number(settings?.defaultCreatorSharePercent ?? 70);
     const artisansWithStats = artisans.map((a) => {
       const stats = ratingMap[a.id];
       const avgRating = stats && stats.count > 0 ? Number((stats.sum / stats.count).toFixed(1)) : 0;
       // owner: true → sertakan ownAvatarUrl; avatarUrl efektif sudah dihitung presentArtisan
       return {
         ...presentArtisan(a, { owner: true }),
+        creatorSharePercent: a.creatorSharePercent === null ? null : Number(a.creatorSharePercent),
+        effectiveCreatorSharePercent: Number(a.creatorSharePercent ?? defaultShare),
         // Sertakan kolom user yang dibutuhkan admin (bukan avatarUrl karena sudah diurus presentArtisan)
         userInfo: a.user ? { id: a.user.id, name: a.user.name, email: a.user.email } : null,
         productCount: a.products.length,
@@ -1001,6 +1020,19 @@ export const listAdminArtisans = async (req: Request, res: Response, next: NextF
 };
 
 // GET /api/admin/products — A5: Daftar seluruh produk untuk admin (termasuk nonaktif)
+export const updateArtisanRevenueShare = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { creatorSharePercent } = req.body;
+    if (creatorSharePercent !== null && (typeof creatorSharePercent !== "number" || !Number.isFinite(creatorSharePercent) || creatorSharePercent < 0 || creatorSharePercent > 100 || !/^\d+(\.\d{1,2})?$/.test(String(creatorSharePercent)))) return res.status(400).json({ error: "creatorSharePercent harus null atau angka 0 sampai 100 dengan maksimal 2 desimal" });
+    const artisan = await prisma.artisan.findUnique({ where: { id: req.params.id } });
+    if (!artisan) return res.status(404).json({ error: "Kreator tidak ditemukan" });
+    if (artisan.isOfficial) throw new HttpError(400, "Official Store tidak dapat diubah bagi hasilnya", "OFFICIAL_STORE_PROTECTED");
+    const settings = await prisma.appSettings.findUnique({ where: { id: 1 } });
+    const updated = await prisma.artisan.update({ where: { id: artisan.id }, data: { creatorSharePercent } });
+    res.json({ message: "Bagi hasil kreator berhasil diperbarui", artisan: { id: updated.id, creatorSharePercent: updated.creatorSharePercent === null ? null : Number(updated.creatorSharePercent), effectiveCreatorSharePercent: Number(updated.creatorSharePercent ?? settings?.defaultCreatorSharePercent ?? 70) } });
+  } catch (err) { next(err); }
+};
+
 export const listAdminProducts = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { q, categoryId, artisanId } = req.query;
@@ -1045,7 +1077,7 @@ export const listAdminProducts = async (req: Request, res: Response, next: NextF
     });
 
     // Terapkan foto efektif artisan sebelum dikembalikan
-    const presentedProducts = products.map((p) => ({
+    const presentedProducts = products.map((p) => serializeProductStatus({
       ...p,
       artisan: p.artisan ? presentArtisan(p.artisan) : p.artisan,
     }));
@@ -1055,6 +1087,105 @@ export const listAdminProducts = async (req: Request, res: Response, next: NextF
     next(err);
   }
 };
+
+const approvalProductInclude = {
+  artisan: { select: { id: true, brandName: true, userId: true } },
+  category: { select: { id: true, name: true } },
+} as const;
+
+async function serializeApprovalProduct(product: any) {
+  const [withdrawn, replacement] = await Promise.all([
+    prisma.product.findMany({
+    where: { artisanId: product.artisanId, withdrawnAt: { not: null }, id: { not: product.id } },
+    orderBy: { withdrawnAt: "desc" },
+    take: 5,
+    select: { id: true, name: true, withdrawnAt: true },
+    }),
+    product.replacesProductId
+      ? prisma.product.findUnique({ where: { id: product.replacesProductId }, select: { id: true, name: true } })
+      : Promise.resolve(null),
+  ]);
+  return serializeProductStatus({
+    id: product.id,
+    name: product.name,
+    price: product.price,
+    images: product.images,
+    shortDescription: product.shortDescription,
+    createdAt: product.createdAt,
+    approvalStatus: product.approvalStatus,
+    statusNote: product.statusNote,
+    withdrawnAt: product.withdrawnAt,
+    replacesProductId: product.replacesProductId,
+    isActive: product.isActive,
+    artisan: product.artisan ? { id: product.artisan.id, brandName: product.artisan.brandName } : null,
+    category: product.category,
+    replacesProduct: replacement,
+    artisanWithdrawn: withdrawn,
+  });
+}
+
+export const listProductApprovals = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const status = req.query.status === undefined ? "menunggu" : req.query.status;
+    if (status !== "menunggu" && status !== "ditolak") {
+      return res.status(400).json({ error: "status harus menunggu atau ditolak", code: "VALIDATION_ERROR" });
+    }
+    const products = await prisma.product.findMany({
+      where: { approvalStatus: status as any },
+      orderBy: status === "menunggu" ? { createdAt: "asc" } : { updatedAt: "desc" },
+      include: approvalProductInclude,
+    });
+    res.json({ products: await Promise.all(products.map(serializeApprovalProduct)) });
+  } catch (err) { next(err); }
+};
+
+async function productApprovalAction(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+  action: "approve" | "reject" | "hide" | "withdraw",
+) {
+  try {
+    const { id } = req.params;
+    const reason = req.body?.reason;
+    if ((action === "reject" || action === "hide") && (typeof reason !== "string" || reason.trim().length < 3 || reason.trim().length > 300)) {
+      return res.status(400).json({ error: "reason wajib 3 sampai 300 karakter", code: "VALIDATION_ERROR" });
+    }
+    if (action === "withdraw" && reason !== undefined && (typeof reason !== "string" || reason.trim().length > 300)) {
+      return res.status(400).json({ error: "reason maksimal 300 karakter", code: "VALIDATION_ERROR" });
+    }
+    const product = await prisma.product.findUnique({ where: { id }, include: { artisan: true } });
+    if (!product) throw new HttpError(404, "Produk tidak ditemukan", "NOT_FOUND");
+    if (action === "approve" && !["menunggu", "ditolak"].includes(product.approvalStatus)) throw new HttpError(409, "Produk tidak berada pada status yang dapat disetujui", "INVALID_STATE");
+    if (action === "reject" && product.approvalStatus !== "menunggu") throw new HttpError(409, "Hanya produk menunggu yang dapat ditolak", "INVALID_STATE");
+    if (action === "hide" && (product.approvalStatus !== "disetujui" || !product.isActive || !!product.withdrawnAt)) throw new HttpError(409, "Produk tidak berada pada status yang dapat disembunyikan", "INVALID_STATE");
+    if (action === "withdraw" && product.withdrawnAt) throw new HttpError(409, "Produk sudah ditarik", "ALREADY_WITHDRAWN");
+    if (action === "withdraw" && product.approvalStatus !== "disetujui") throw new HttpError(409, "Hanya produk yang disetujui yang dapat ditarik", "INVALID_STATE");
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const data: any = action === "approve"
+        ? { approvalStatus: "disetujui", statusNote: null, isActive: true }
+        : action === "reject"
+          ? { approvalStatus: "ditolak", statusNote: reason.trim() }
+          : action === "hide"
+            ? { isActive: false, statusNote: reason.trim() }
+            : { isActive: false, withdrawnAt: new Date(), statusNote: reason?.trim() || "Tidak laku selama 6 bulan" };
+      const result = await tx.product.update({ where: { id }, data, include: approvalProductInclude });
+      if (product.artisan.userId) {
+        const type = action === "approve" ? "produk_disetujui" : action === "reject" ? "produk_ditolak" : action === "hide" ? "produk_disembunyikan" : "produk_ditarik";
+        const title = action === "approve" ? "Produk disetujui" : action === "reject" ? "Produk ditolak" : action === "hide" ? "Produk disembunyikan" : "Produk ditarik";
+        await tx.notification.create({ data: { userId: product.artisan.userId, type: type as any, title, body: `${title}: ${product.name}.${reason ? ` Alasan: ${reason.trim()}` : ""}` } });
+      }
+      return result;
+    });
+    res.json({ message: "Status produk berhasil diperbarui", product: await serializeApprovalProduct(updated) });
+  } catch (err) { next(err); }
+}
+
+export const approveProduct = (req: Request, res: Response, next: NextFunction) => productApprovalAction(req, res, next, "approve");
+export const rejectProduct = (req: Request, res: Response, next: NextFunction) => productApprovalAction(req, res, next, "reject");
+export const hideProduct = (req: Request, res: Response, next: NextFunction) => productApprovalAction(req, res, next, "hide");
+export const withdrawProduct = (req: Request, res: Response, next: NextFunction) => productApprovalAction(req, res, next, "withdraw");
 
 // PATCH /api/admin/products/:id/active — A5: Ubah status aktif/nonaktif produk
 export const toggleProductActive = async (req: Request, res: Response, next: NextFunction) => {
@@ -1073,12 +1204,15 @@ export const toggleProductActive = async (req: Request, res: Response, next: Nex
 
     const updated = await prisma.product.update({
       where: { id },
-      data: { isActive },
+      data: {
+        isActive,
+        ...(isActive ? { withdrawnAt: null, statusNote: null, approvalStatus: "disetujui" } : {}),
+      },
     });
 
     res.json({
       message: `Produk berhasil di${isActive ? "aktifkan" : "nonaktifkan"}`,
-      product: updated,
+      product: serializeProductStatus(updated),
     });
   } catch (err) {
     next(err);
@@ -1313,7 +1447,13 @@ export default {
   deleteReview,
   toggleArtisanStatus,
   listAdminArtisans,
+  updateArtisanRevenueShare,
   listAdminProducts,
+  listProductApprovals,
+  approveProduct,
+  rejectProduct,
+  hideProduct,
+  withdrawProduct,
   toggleProductActive,
   listAdminReviews,
   listAdminUsers,

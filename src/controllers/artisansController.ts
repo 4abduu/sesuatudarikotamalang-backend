@@ -58,7 +58,7 @@ export const listArtisans = async (req: Request, res: Response, next: NextFuncti
     const artisans = await prisma.artisan.findMany({
       where: { status: "aktif" },
       include: {
-        products: { where: { isActive: true } },
+        products: { where: { isActive: true, approvalStatus: "disetujui" } },
         user: { select: { avatarUrl: true } },
       },
     });
@@ -113,7 +113,7 @@ export const getArtisanById = async (req: Request, res: Response, next: NextFunc
       where: { id: req.params.id, status: "aktif" },
       include: {
         products: {
-          where: { isActive: true },
+          where: { isActive: true, approvalStatus: "disetujui" },
           include: { story: true },
         },
         user: { select: { avatarUrl: true } },

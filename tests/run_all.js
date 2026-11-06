@@ -65,6 +65,8 @@ const suites = [
   "test_refund_webhook.js",               // Langkah 5f: late settlement
   "test_pickup_slot_time.js",             // Slot pickup: hari yang sama, slot lewat, hari Minggu
   "test_pickup_schedule.js",              // Fase B: jadwal pickup database & endpoint admin
+  "test_pickup_holidays.js",              // Step 2: kalender libur pickup dan dampaknya ke slot
+  "test_product_approvals.js",             // Step 3: persetujuan dan status produk
   "step2_schema_check.js",
   "test_upload_errors.js",               // Langkah 10: whitelist MIME, ukuran, batas laju, batas foto
   "test_product_image_variants.js",      // Langkah 10: validateImageVariants, normalizeImageOrder, pruneImageVariants

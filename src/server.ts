@@ -2,6 +2,7 @@ import app from "./app";
 import { startOrderStatusJob } from "./jobs/orderStatusJob";
 import { startTokenCleanupJob } from "./jobs/tokenCleanupJob";
 import { startUploadCleanupJob } from "./jobs/uploadCleanupJob";
+import { startSlowMoverJob } from "./jobs/slowMoverJob";
 
 const PORT = process.env.PORT || 4000;
 
@@ -10,4 +11,5 @@ app.listen(PORT, () => {
   startOrderStatusJob();
   startTokenCleanupJob();
   startUploadCleanupJob();
+  startSlowMoverJob();
 });

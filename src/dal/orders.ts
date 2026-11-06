@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { badRequest, forbidden, notFound } from "./errors";
 import { AuthUser } from "./types";
 import { isPaymentSuccess } from "../lib/paymentStatus";
+import { addHolidayFields } from "../lib/holidays";
 
 const orderInclude = {
   items: {
@@ -15,11 +16,12 @@ const orderInclude = {
 } as const;
 
 export async function listMyOrders(user: AuthUser) {
-  return prisma.order.findMany({
+  const orders = await prisma.order.findMany({
     where: { userId: user.id },
     include: orderInclude,
     orderBy: { createdAt: "desc" },
   });
+  return addHolidayFields(orders);
 }
 
 export async function getOrderForUser(user: AuthUser, id: string, include?: Record<string, unknown>) {
@@ -32,7 +34,8 @@ export async function getOrderForUser(user: AuthUser, id: string, include?: Reco
     : await prisma.order.findFirst({ where: { id, userId: user.id }, include: queryInclude as any });
 
   if (!order) throw notFound("Pesanan tidak ditemukan");
-  return order;
+  const [decorated] = await addHolidayFields([order]);
+  return decorated;
 }
 
 export async function cancelOrderForUser(user: AuthUser, id: string) {

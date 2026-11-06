@@ -1,5 +1,36 @@
 import prisma from "./prisma";
 import { Prisma } from "@prisma/client";
+import { HttpError } from "./httpError";
+
+export async function applyStockChange(
+  tx: Prisma.TransactionClient,
+  input: { productId: string; variantId?: string | null; delta: number; reason: "barang_masuk" | "opname" | "terjual_kasir" | "rusak_hilang" | "koreksi" | "pesanan"; note?: string | null; actorId?: string | null; orderId?: string | null },
+) {
+  if (!Number.isInteger(input.delta) || input.delta === 0) throw new HttpError(400, "delta harus bilangan bulat dan tidak boleh 0", "VALIDATION_ERROR");
+  const variant = input.variantId
+    ? await tx.productVariant.findFirst({ where: { id: input.variantId, productId: input.productId } })
+    : await tx.productVariant.findFirst({ where: { productId: input.productId }, orderBy: { id: "asc" } });
+  if (!variant) throw new HttpError(404, "Varian produk tidak ditemukan", "NOT_FOUND");
+  await tx.$queryRaw`SELECT id FROM product_variants WHERE id = ${variant.id} FOR UPDATE`;
+  const current = await tx.productVariant.findUnique({ where: { id: variant.id } });
+  const stockAfter = (current?.stock ?? 0) + input.delta;
+  if (stockAfter < 0) throw new HttpError(400, `Stok saat ini ${current?.stock ?? 0} tidak cukup`, "INSUFFICIENT_STOCK");
+  await tx.productVariant.update({ where: { id: variant.id }, data: { stock: stockAfter } });
+  const movement = await tx.stockMovement.create({ data: { productId: input.productId, variantId: variant.id, delta: input.delta, stockAfter, reason: input.reason, note: input.note ?? null, actorId: input.actorId ?? null, orderId: input.orderId ?? null } });
+  const aggregate = await tx.productVariant.aggregate({ where: { productId: input.productId }, _sum: { stock: true } });
+  const product = await tx.product.findUnique({ where: { id: input.productId }, include: { artisan: true } });
+  if (product) {
+    const settings = await tx.appSettings.findUnique({ where: { id: 1 } });
+    const threshold = settings?.lowStockThreshold ?? 5;
+    if ((aggregate._sum.stock ?? 0) > threshold && product.lowStockNotifiedAt) {
+      await tx.product.update({ where: { id: product.id }, data: { lowStockNotifiedAt: null } });
+    } else if ((aggregate._sum.stock ?? 0) <= threshold && !product.lowStockNotifiedAt && product.artisan.userId) {
+      await tx.product.update({ where: { id: product.id }, data: { lowStockNotifiedAt: new Date() } });
+      await tx.notification.create({ data: { userId: product.artisan.userId, type: "stok_menipis", title: "Stok menipis", body: `Stok produk ${product.name} menipis (${aggregate._sum.stock ?? 0}).` } });
+    }
+  }
+  return { movement, stock: stockAfter };
+}
 
 /**
  * Hitung stok efektif satu variant:

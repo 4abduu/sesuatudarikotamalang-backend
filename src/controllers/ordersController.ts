@@ -8,6 +8,7 @@ import { isRetryableTransactionError } from "../lib/txRetry";
 import { toWibDateString, todayWibString } from "../lib/dates";
 import { cancelOrderForUser, getOrderForUser, listMyOrders } from "../dal/orders";
 import { computeRefund } from "../lib/refund";
+import { addHolidayFields, holidayInfoFor, loadHolidayContext } from "../lib/holidays";
 
 // GET /api/orders — Riwayat pesanan milik user yang sedang login
 export const listOrders = async (req: Request, res: Response, next: NextFunction) => {
@@ -95,6 +96,12 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
     const maxDateStr = maxDate.toISOString().slice(0, 10);
     if (pickupDateStr > maxDateStr) {
       return res.status(400).json({ error: "pickupDate maksimal 14 hari dari hari ini" });
+    }
+
+    const holidayContext = await loadHolidayContext(prisma, pickupDateStr, pickupDateStr);
+    const holiday = holidayInfoFor(pickupDateStr, holidayContext);
+    if (holiday) {
+      return res.status(400).json({ error: `Tanggal pickup ini ditutup karena ${holiday.reason}`, code: "PICKUP_DATE_CLOSED" });
     }
 
     // Pickup di hari yang sama diperbolehkan selama pemesanan slot belum ditutup: jam mulai (WIB)
@@ -379,7 +386,8 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
       }
     }
 
-    res.status(201).json({ order: newOrder, snap: snapResponse });
+    const [decoratedOrder] = await addHolidayFields([newOrder]);
+    res.status(201).json({ order: decoratedOrder, snap: snapResponse });
   } catch (err: any) {
     if (err.status) {
       const errorResp: any = { error: err.message };
@@ -400,8 +408,9 @@ export const cancelOrder = async (req: Request, res: Response, next: NextFunctio
     const { id } = req.params;
 
     const updatedOrder = await cancelOrderForUser(req.user, id);
+    const [decoratedOrder] = await addHolidayFields([updatedOrder]);
 
-    res.json({ message: "Pesanan berhasil dibatalkan", order: updatedOrder });
+    res.json({ message: "Pesanan berhasil dibatalkan", order: decoratedOrder });
   } catch (err) {
     next(err);
   }

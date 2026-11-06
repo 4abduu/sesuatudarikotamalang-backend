@@ -22,6 +22,7 @@ export const search = async (req: Request, res: Response, next: NextFunction) =>
       prisma.product.findMany({
         where: {
           isActive: true,
+          approvalStatus: "disetujui",
           artisan: { status: "aktif" }, // F-13: filter kreator aktif saja
           OR: [
             { name: { contains: q } },
@@ -51,7 +52,7 @@ export const search = async (req: Request, res: Response, next: NextFunction) =>
           ],
         },
         include: {
-          products: { where: { isActive: true } },
+          products: { where: { isActive: true, approvalStatus: "disetujui" } },
           user: { select: { avatarUrl: true } },
         },
         orderBy: { createdAt: "desc" },

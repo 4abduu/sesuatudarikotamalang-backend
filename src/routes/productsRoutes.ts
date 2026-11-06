@@ -21,7 +21,7 @@ router.post("/", requireAuth, requireRole("creator", "admin"), productsControlle
 router.put("/:id", requireAuth, requireRole("creator", "admin"), productsController.updateProduct);
 
 // DELETE /api/products/:id — Soft Delete produk (Admin only)
-router.delete("/:id", requireAuth, requireRole("admin"), productsController.deleteProduct);
+router.delete("/:id", requireAuth, requireRole("creator", "admin"), productsController.deleteProduct);
 
 // POST /api/products/:id/story — Tambah / Update cerita Behind the Design (Creator pemilik / Admin)
 router.post("/:id/story", requireAuth, requireRole("creator", "admin"), productsController.upsertStory);
