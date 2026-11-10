@@ -79,7 +79,7 @@ const invokeErrorHandler = (error) => {
   });
   assert.deepStrictEqual(invokeErrorHandler(new HttpError(500, "Detail internal", "SECRET_INTERNAL")), {
     statusCode: 500,
-    body: { error: "Detail internal" },
+    body: { error: "Terjadi kesalahan pada server.", code: "INTERNAL_ERROR" },
   });
   assert.deepStrictEqual(invokeErrorHandler({ status: 400, message: "Error biasa", code: "INTERNAL_CODE" }), {
     statusCode: 400,

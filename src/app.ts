@@ -47,10 +47,17 @@ import categoriesRoutes from "./routes/categoriesRoutes";
 import slotsRoutes from "./routes/slotsRoutes";
 import settingsRoutes from "./routes/settingsRoutes";
 import aiRoutes from "./routes/aiRoutes";
-import { HttpError } from "./lib/httpError";
 import { apiLimiter } from "./middleware/rateLimiter";
+import { requestId } from "./middleware/requestId";
+import { logger, requestLogger } from "./logger";
+import { errorHandler } from "./middleware/errorHandler";
+
+export { errorHandler } from "./middleware/errorHandler";
 
 const app = express();
+
+app.use(requestId);
+app.use(requestLogger);
 
 // F-04: Trust proxy di belakang reverse proxy (Railway, Render, Nginx)
 if (process.env.TRUST_PROXY && process.env.TRUST_PROXY !== "false" && process.env.TRUST_PROXY !== "0") {
@@ -113,52 +120,19 @@ app.use("/api/ai", aiRoutes);
 
 // 404 handler
 app.use((_req: Request, res: Response) => {
-  res.status(404).json({ error: "Route not found" });
+  const requestId = res.locals.requestId;
+  res.status(404).json({ error: "Rute tidak ditemukan", code: "NOT_FOUND", ...(requestId ? { requestId } : {}) });
 });
-
-// Error handler — jangan pernah log password atau token ke console
-export const errorHandler = (err: any, req: Request, res: Response, _next: NextFunction) => {
-  // Sanitasi: hapus field sensitif dari body sebelum log
-  const sanitizedBody = req.body ? { ...req.body } : {};
-  const sensitiveFields = ["password", "oldPassword", "newPassword", "token", "idToken", "code"];
-  for (const field of sensitiveFields) {
-    if (sanitizedBody[field]) sanitizedBody[field] = "[REDACTED]";
-  }
-
-  console.error("[ERROR]", {
-    method: req.method,
-    path: req.path,
-    body: sanitizedBody,
-    message: err.message,
-    stack: process.env.NODE_ENV === "production" ? undefined : err.stack,
-  });
-
-  const statusCode = err.status || 500;
-  // F-11: Jangan bocorkan detail error internal DB / Prisma (status >= 500) di produksi
-  const responseMessage =
-    statusCode >= 500
-      ? process.env.NODE_ENV === "production"
-        ? "Terjadi kesalahan internal server"
-        : err.message || "Internal server error"
-      : err.message;
-
-  const response: { error: string; code?: string } = { error: responseMessage };
-  if (err instanceof HttpError && statusCode < 500 && err.code) {
-    response.code = err.code;
-  }
-
-  res.status(statusCode).json(response);
-};
 
 app.use(errorHandler);
 
 // F-11: Handler unhandledRejection & uncaughtException
 process.on("unhandledRejection", (reason) => {
-  console.error("[UNHANDLED REJECTION]", reason);
+  logger.error({ err: reason }, "unhandled rejection");
 });
 
 process.on("uncaughtException", (error) => {
-  console.error("[UNCAUGHT EXCEPTION]", error);
+  logger.error({ err: error }, "uncaught exception");
 });
 
 export default app;

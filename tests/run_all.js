@@ -25,6 +25,7 @@ const suites = [
   "test_routes_mounted.js",
   "test_pickup_date_validation.js",
   "test_typed_errors.js",
+  "test_error_handling.js",
   "test_policies.js",
   "test_dal_isolation.js",
   "test_cancel_order_atomic.js",
