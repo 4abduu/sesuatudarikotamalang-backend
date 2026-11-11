@@ -620,7 +620,7 @@ const PRODUCTS: ProductSpec[] = [
   { key: "notebook-sampul-kain", seller: "alya", cat: "zine", name: "Notebook Sampul Kain Heritage", price: 32000, short: "Notebook daur ulang sampul kain.", desc: "Notebook kertas daur ulang dengan sampul kain bermotif ubin rumah lama.", photos: [], added: 115, stock: 7, w: 3, q: 4.4 },
   { key: "jurnal-kertas-daur-ulang", seller: "alya", cat: "zine", name: "Jurnal Kertas Daur Ulang Heritage", price: 38000, short: "Jurnal polos kertas daur ulang tebal.", desc: "Jurnal polos berisi 80 halaman kertas daur ulang, dijilid benang manual.", photos: ["paper"], added: 80, stock: 12, w: 4, q: 4.6 },
   { key: "bookmark-kayu-ukir-kayutangan", seller: "alya", cat: "kriya-kayu", name: "Bookmark Kayu Ukir Kayutangan", price: 14000, short: "Pembatas buku kayu ukir ornamen.", desc: "Pembatas buku dari kayu tipis dengan ukiran ornamen jendela heritage Kayutangan.", photos: ["craft"], added: 45, stock: 25, w: 5, q: 4.8 },
-  { key: "kartu-pos-bunga-kertas", seller: "alya", cat: "postcard", name: "Kartu Pos Bunga Kertas", price: 14000, short: "Kartu pos bunga kertas warna-warni.", desc: "Kartu pos dengan ilustrasi bunga kertas yang tumbuh di pagar rumah-rumah lama.", photos: ["postcard"], added: 30, stock: 28, w: 4, q: 4.5 },
+  { key: "kartu-pos-bunga-kertas", seller: "alya", cat: "postcard", name: "Kartu Pos Bunga Kertas", price: 14000, short: "Kartu pos bunga kertas warna-warni.", desc: "Kartu pos dengan ilustrasi bunga kertas yang tumbuh di pagar rumah-rumah lama.", photos: ["postcard"], added: 5, stock: 28, w: 4, q: 4.5 },
   { key: "rak-mini-kayu-kampung", seller: "alya", cat: "kriya-kayu", name: "Rak Mini Kayu Kampung", price: 85000, short: "Rak mini kayu sisa produksi.", desc: "Rak mini dari kayu sisa produksi mebel kampung yang belum banyak terjual.", photos: ["craft"], added: 155, stock: 3, noSales: true },
   { key: "baki-kayu-motif-sawah", seller: "alya", cat: "kriya-kayu", name: "Baki Kayu Motif Sawah", price: 72000, short: "Baki kayu koleksi lama motif sawah.", desc: "Baki kayu koleksi lama dengan ukiran motif sawah bertingkat.", photos: [], added: 190, stock: 1, noSales: true },
   { key: "sketsa-gang-ijen-lama", seller: "alya", cat: "postcard", name: "Sketsa Gang Ijen Lama", price: 26000, short: "Produk lama yang sudah ditarik admin.", desc: "Sketsa gang di kawasan Ijen tempo dulu. Ditarik sebagai contoh alur penggantian produk.", photos: [], added: 205, stock: 0, status: "ditarik", statusAgo: 20, note: "Tidak laku selama 6 bulan", noSales: true },
@@ -628,7 +628,7 @@ const PRODUCTS: ProductSpec[] = [
   { key: "stiker-sketsa-alun-alun", seller: "alya", cat: "stiker", name: "Stiker Sketsa Alun-Alun", price: 9000, short: "Set stiker sketsa alun-alun kota.", desc: "Set stiker sketsa alun-alun kota untuk contoh produk yang perlu revisi.", photos: [], added: 4, stock: 20, status: "ditolak", statusAgo: 1, note: "Foto produk dan deskripsi perlu diperjelas sebelum disetujui.", noSales: true },
   /* --- Tanah Dinoyo --- */
   { key: "mug-keramik-glasir-dinoyo", seller: "sinta", cat: "keramik", name: "Mug Keramik Glasir Dinoyo", price: 52000, short: "Mug gerabah glasir hijau botol.", desc: "Mug gerabah dengan glasir hijau botol dan pegangan lebar yang nyaman digenggam.", photos: ["ceramic"], added: 100, stock: 12, w: 5, q: 4.7 },
-  { key: "vas-bunga-mini-gerabah", seller: "sinta", cat: "keramik", name: "Vas Bunga Mini Gerabah", price: 58000, short: "Vas mini untuk bunga kering.", desc: "Vas mini dari tanah liat bakar, pas untuk bunga kering di meja kerja.", photos: ["ceramic", "craft"], added: 40, stock: 8, w: 3, q: 4.6 },
+  { key: "vas-bunga-mini-gerabah", seller: "sinta", cat: "keramik", name: "Vas Bunga Mini Gerabah", price: 58000, short: "Vas mini untuk bunga kering.", desc: "Vas mini dari tanah liat bakar, pas untuk bunga kering di meja kerja.", photos: ["ceramic", "craft"], added: 3, stock: 8, w: 3, q: 4.6 },
   { key: "set-tatakan-keramik", seller: "sinta", cat: "keramik", name: "Set Tatakan Keramik (4 pcs)", price: 85000, short: "Set empat tatakan keramik glasir.", desc: "Satu set empat tatakan keramik bergaris glasir, dikemas dalam kotak kardus daur ulang.", photos: [], added: 25, stock: 10, w: 3, q: 4.5, limited: true },
   { key: "piring-hias-mini-glasir", seller: "sinta", cat: "keramik", name: "Piring Hias Mini Glasir", price: 48000, short: "Piring hias mini untuk pajangan.", desc: "Piring hias mini bermotif flora dengan glasir bening, untuk pajangan atau tempat perhiasan.", photos: ["ceramic"], added: 162, stock: 4, noSales: true, oldSale: 158 },
   { key: "cangkir-cat-air-mini", seller: "sinta", cat: "keramik", name: "Cangkir Cat Air Mini", price: 40000, short: "Cangkir mini lukis cat air.", desc: "Cangkir mini dengan lukisan cat air bunga liar.", photos: [], added: 6, stock: 10, status: "ditolak", statusAgo: 4, note: "Foto produk belum menampilkan detail dari beberapa sisi. Mohon unggah foto tambahan.", noSales: true },
@@ -661,6 +661,9 @@ const STORIES: Record<string, StorySpec> = {
   "poster-a3-kayutangan-1920": { title: "Kayutangan Seratus Tahun Lalu", content: "Foto-foto lama koridor Kayutangan dipulihkan supaya kita bisa membayangkan jalan yang sama puluhan tahun lalu.", process: "Arsip dipindai, dibersihkan dari noda dan goresan secara digital, lalu dicetak di kertas matte tebal.", cover: "art", proc: ["art", "workspace"] },
   "kaos-arek-malang-heritage": { title: "Peta di Dada", content: "Peta lama Malang dicetak di bagian dada, supaya penggunanya selalu membawa kota ini ke mana pun pergi.", process: "Peta digambar ulang garis demi garis lalu disablon plastisol di atas katun combed.", cover: "textile", proc: [] },
   "mug-lukis-tangan-pasar-besar": { title: "Pagi di Pasar Besar", content: "Mug ini menangkap suasana pagi Pasar Besar: pedagang menata dagangan sambil menyeduh kopi pertama hari itu.", process: "Setiap mug dilukis tangan dengan cat keramik food-safe, lalu dibakar ulang agar warnanya awet.", cover: "ceramic", proc: ["craft"] },
+  "jurnal-kertas-daur-ulang": { title: "Kertas yang Diberi Kesempatan Kedua", content: "Jurnal ini dibuat dari kertas sisa percetakan yang dipilah dan dipres ulang, supaya tidak berakhir jadi sampah.", process: "Kertas direndam, dihancurkan, dicetak ulang di kerangka, dijemur, lalu dijilid benang secara manual.", cover: "paper", proc: ["workspace"] },
+  "bookmark-kayu-ukir-kayutangan": { title: "Jendela Kecil di Antara Halaman", content: "Ornamen jendela heritage Kayutangan diperkecil jadi pembatas buku, agar setiap halaman punya sudut kota yang menunggu.", process: "Pola digambar di kayu tipis, diukir dengan pisau kecil, diamplas halus lalu dilapis minyak alami.", cover: "craft", proc: ["craft", "workspace"] },
+  "mug-keramik-glasir-dinoyo": { title: "Hijau Botol dari Tungku Dinoyo", content: "Warna hijau botol berasal dari glasir yang diracik sendiri. Setiap mug punya gradasi sedikit berbeda.", process: "Dibentuk di meja putar, dibakar biskuit, dicelup glasir, lalu dibakar lagi pada suhu tinggi.", cover: "ceramic", proc: ["ceramic", "craft"] },
   "tote-bag-kanvas-singosari": { title: "Penjaga dari Singosari", content: "Siluet Dwarapala dipilih karena menjadi penjaga gerbang yang tenang dan kokoh, seperti kanvas yang menopang bawaanmu.", process: "Sablon manual satu warna di atas kanvas tebal, dijemur, lalu difiksasi dengan setrika panas.", cover: "bag", proc: ["textile"] },
 };
 
@@ -784,26 +787,47 @@ const uuidLike = (): string => `${hex(8)}-${hex(4)}-4${hex(3)}-a${hex(3)}-${hex(
 
 /** Perpanjangan hold (menit) agar hold COD mencakup jam pickup; null bila melebihi batas 2 hari. */
 function codExt(created: Date, slotStart: Date): number | null {
-  const need = Math.ceil((slotStart.getTime() - created.getTime()) / MIN) + 15;
+  const need = Math.ceil((slotStart.getTime() - created.getTime()) / MIN) + 80; // margin: pengambilan bisa molor ±70 menit
   if (need <= 1440) return 0;
   const ext = Math.ceil((need - 1440) / 360) * 360;
   return ext <= 1440 ? ext : null;
 }
 
-/** Cari tanggal+slot pickup yang masih kosong, mulai `lead` hari dari tanggal createdAt. */
-function findPickup(created: Date, lead: number, method: Method, exactDate?: string): { date: string; slot: string; ext: number } | null {
-  let d = exactDate ?? nextOpen(addDays(wibDate(created), lead));
-  for (let tries = 0; tries < (exactDate ? 1 : 6); tries++) {
-    const cands = activeSlotTimes().filter((sl) => {
-      if (!slotFree(d, sl)) return false;
-      const start = wibAt(d, sl);
-      if (start.getTime() < created.getTime() + 45 * MIN) return false;
-      return method === "midtrans" || codExt(created, start) !== null;
-    });
-    if (cands.length) {
-      const sl = weightedPick(cands, (c) => SLOT_WEIGHT[c] ?? 1)!;
-      return { date: d, slot: sl, ext: method === "cod" ? codExt(created, wibAt(d, sl)) ?? 0 : 0 };
+/**
+ * Cari tanggal+slot pickup yang masih kosong, mulai `lead` hari dari tanggal createdAt.
+ * `past=true` -> hanya slot yang sudah lewat (untuk pesanan yang sudah selesai diambil).
+ */
+function findPickup(created: Date, lead: number, method: Method, exactDate?: string, past = false): { date: string; slot: string; ext: number } | null {
+  const okSlot = (d: string, sl: string): boolean => {
+    if (!slotFree(d, sl)) return false;
+    const start = wibAt(d, sl);
+    if (start.getTime() < created.getTime() + 45 * MIN) return false;
+    if (past && start.getTime() + 25 * MIN >= NOW.getTime()) return false;
+    return method === "midtrans" || codExt(created, start) !== null;
+  };
+  const choose = (d: string): { date: string; slot: string; ext: number } | null => {
+    const cands = activeSlotTimes().filter((sl) => okSlot(d, sl));
+    if (!cands.length) return null;
+    const sl = weightedPick(cands, (c) => SLOT_WEIGHT[c] ?? 1)!;
+    return { date: d, slot: sl, ext: method === "cod" ? codExt(created, wibAt(d, sl)) ?? 0 : 0 };
+  };
+  if (exactDate) return choose(exactDate);
+  if (past) {
+    const target = nextOpen(addDays(wibDate(created), lead));
+    const days: string[] = [];
+    let d = nextOpen(wibDate(created));
+    for (let i = 0; i < 12 && d <= TODAY; i++) { days.push(d); d = nextOpen(addDays(d, 1)); }
+    const dist = (x: string): number => Math.abs(new Date(`${x}T00:00:00Z`).getTime() - new Date(`${target}T00:00:00Z`).getTime());
+    for (const x of days.sort((m, n) => dist(m) - dist(n))) {
+      const r = choose(x);
+      if (r) return r;
     }
+    return null;
+  }
+  let d = nextOpen(addDays(wibDate(created), lead));
+  for (let tries = 0; tries < 6; tries++) {
+    const r = choose(d);
+    if (r) return r;
     d = nextOpen(addDays(d, 1));
   }
   return null;
@@ -836,11 +860,7 @@ function buildOrder(s: BuildSpec): OrderRec {
   switch (s.outcome) {
     case "selesai": {
       if (slotStart.getTime() + 5 * MIN >= NOW.getTime()) fail("slot belum lewat");
-      // COD hold harus tetap mencakup waktu penyelesaian pickup, bukan hanya
-      // awal slot. Sisakan sedikit buffer agar data demo tidak terlihat selesai
-      // setelah hold berakhir ketika hold berakhir tepat di sekitar slot pickup.
-      const latestDone = !mid ? holdExpiresAt.getTime() - 5 * MIN : NOW.getTime() - MIN;
-      const done = new Date(Math.min(NOW.getTime() - MIN, slotStart.getTime() + rint(5, 70) * MIN, latestDone));
+      const done = new Date(Math.min(NOW.getTime() - MIN, slotStart.getTime() + rint(5, 70) * MIN));
       if (done.getTime() <= t.getTime()) fail("completedAt sebelum createdAt");
       if (!mid && done.getTime() > holdExpiresAt.getTime()) fail("COD selesai setelah hold habis");
       o.status = "selesai"; o.completedAt = done; o.updatedAt = done;
@@ -1018,9 +1038,9 @@ export async function runSeed(prisma: PrismaClient): Promise<SeedSummary> {
   const creatorByKey = new Map(creators.map((c) => [c.spec.key, c]));
 
   // pembeli bernama (akun demo) + pembeli generik
-  const budi = addUser("budi", "Budi Santoso", buyerEmail, "buyer", "portrait", agoDate(160), 6);
-  const sari = addUser("sari", "Sari Wulandari", "sari.demo@sesuatudarikota.test", "buyer", null, agoDate(155), 5);
-  const rizal = addUser("rizal", "Rizal Mahendra", "rizal.demo@sesuatudarikota.test", "buyer", "portraitThree", agoDate(150), 5);
+  const budi = addUser("budi", "Budi Santoso", buyerEmail, "buyer", "portrait", agoDate(175), 1.6);
+  const sari = addUser("sari", "Sari Wulandari", "sari.demo@sesuatudarikota.test", "buyer", null, agoDate(172), 1.4);
+  const rizal = addUser("rizal", "Rizal Mahendra", "rizal.demo@sesuatudarikota.test", "buyer", "portraitThree", agoDate(170), 1.4);
   const nadia = addUser("nadia", "Nadia Permata", "calon.kreator@sesuatudarikota.test", "buyer", null, agoDate(60), 1);
   const fajar = addUser("fajar", "Fajar Kurniawan", "fajar.demo@sesuatudarikota.test", "buyer", "portrait", agoDate(44), 1);
   const salsa = addUser("salsa", "Salsa Rahmadani", "salsa.demo@sesuatudarikota.test", "buyer", null, agoDate(30), 1);
@@ -1032,7 +1052,7 @@ export async function runSeed(prisma: PrismaClient): Promise<SeedSummary> {
     let email = `${first}.${last}`.toLowerCase() + "@sesuatudarikota.test";
     if (usedEmails.has(email)) email = `${first}.${last}${i}`.toLowerCase() + "@sesuatudarikota.test";
     usedEmails.add(email);
-    const ago = Math.max(4, Math.round(148 - i * 4.2 + rint(-3, 3)));
+    const ago = Math.max(4, Math.round(168 - i * 4.9 + rint(-3, 3)));
     const avatar = chance(0.3) ? pick(["portrait", "portraitTwo", "portraitThree"]) : null;
     generated.push(addUser(`b${i + 1}`, `${first} ${last}`, email, "buyer", avatar, agoDate(ago), pick([1, 1, 1, 2, 2, 3])));
   }
@@ -1168,20 +1188,29 @@ export async function runSeed(prisma: PrismaClient): Promise<SeedSummary> {
 
   /* ---------- 3.8 skenario terarah (jaminan halaman tidak kosong) ---------- */
   const randomProduct = (t: Date): ProductRec => weightedPick(eligibleAt(t), (p) => p.spec.w ?? 2) ?? products[0];
-  const mk = (o: { user?: UserRec; product?: ProductRec | string; method: Method; outcome: Outcome; created: Date; lead?: number; date?: string; slot?: string; reason?: CancelWhy; refund?: "menunggu" | "selesai"; noReview?: boolean; adminNotified?: boolean }): OrderRec => {
+  const mk = (o: { user?: UserRec; product?: ProductRec | string; method: Method; outcome: Outcome; created: Date; lead?: number; date?: string; slot?: string; reason?: CancelWhy; refund?: "menunggu" | "selesai"; noReview?: boolean; adminNotified?: boolean }): OrderRec | null => {
     const product = typeof o.product === "string" ? productByKey.get(o.product)! : o.product ?? randomProduct(o.created);
-    // Skenario terarah harus selalu memiliki pemilik pesanan. Pada tanggal
-    // tertentu semua buyer demo bisa belum terdaftar, jadi gunakan buyer utama
-    // sebagai fallback deterministik.
-    const user = o.user ?? pickBuyer(o.created) ?? budi;
+    const user = o.user ?? pickBuyer(o.created);
+    if (!user) throw new Error(`Skenario ${o.outcome}: tidak ada pembeli yang sudah terdaftar pada ${o.created.toISOString()}`);
     let ext = 0;
     let date = o.date;
     let slot = o.slot;
     if (!date || !slot) {
-      const pk = findPickup(o.created, o.lead ?? 1, o.method, o.date);
-      if (!pk) throw new Error(`Skenario gagal menemukan slot pickup (${o.outcome})`);
+      let pk: { date: string; slot: string; ext: number } | null = null;
+      if (o.outcome === "selesai") pk = findPickup(o.created, o.lead ?? 1, o.method, undefined, true);
+      else for (const L of o.method === "cod" ? [o.lead ?? 1, 0, 1, 2] : [o.lead ?? 1, 0, 2]) { pk = findPickup(o.created, L, o.method, o.date); if (pk) break; }
+      if (!pk) return null; // tidak ada slot yang cocok pada waktu seeder dijalankan (mis. tengah malam) -> lewati skenario
       date = pk.date; slot = pk.slot; ext = pk.ext;
     } else if (o.method === "cod") ext = codExt(o.created, wibAt(date, slot)) ?? 0;
+    if (o.method === "cod" && o.outcome === "menunggu") {
+      // hold harus masih berjalan saat ini; perpanjang bila perlu (maks. total 2 hari)
+      const alive = Math.ceil((NOW.getTime() - o.created.getTime()) / MIN) + 90;
+      if (1440 + ext < alive) {
+        const e2 = Math.ceil((alive - 1440) / 360) * 360;
+        if (e2 > 1440) return null;
+        ext = e2;
+      }
+    }
     return register(buildOrder({ user, product, variant: pickVariant(product), method: o.method, outcome: o.outcome, createdAt: o.created, date, slot, ext, reason: o.reason, refund: o.refund, noReview: o.noReview, adminNotified: o.adminNotified }));
   };
 
@@ -1223,7 +1252,8 @@ export async function runSeed(prisma: PrismaClient): Promise<SeedSummary> {
     const created = new Date(NOW.getTime() - rint(200, 2000) * MIN);
     const pk = findPickup(created, 0, "midtrans", hd);
     if (!pk) return;
-    affected.push(mk({ user: i === 0 ? budi : i === 1 ? rizal : undefined, method: "midtrans", outcome: "lunas", created, date: pk.date, slot: pk.slot }));
+    const a = mk({ user: i === 0 ? budi : i === 1 ? rizal : undefined, method: "midtrans", outcome: "lunas", created, date: pk.date, slot: pk.slot });
+    if (a) affected.push(a);
   });
 
   // (f) lewat batas pengambilan
@@ -1386,13 +1416,23 @@ export async function runSeed(prisma: PrismaClient): Promise<SeedSummary> {
   for (const o of orders) {
     if (o.status !== "selesai" || o.noReview) continue;
     const named = namedBuyers.includes(o.user);
-    if (!chance(named ? 0.7 : 0.45)) continue;
+    if (!chance(named ? 0.92 : 0.45)) continue;
     const rating = pickRating(o.product.spec.q ?? 4.5);
     const at = new Date((o.completedAt as Date).getTime() + rint(180, 7200) * MIN);
     if (at.getTime() > NOW.getTime() - MIN) continue;
     reviewedItems.push({ order: o, rating, at, text: comment(rating, o.product.spec.cat), idx: reviewedItems.length });
   }
-  const hiddenIdx = new Set(shuffle(reviewedItems.filter((r) => NOW.getTime() - r.at.getTime() > 4 * DAY && !namedBuyers.includes(r.order.user)).map((r) => r.idx)).slice(0, HIDDEN_REVIEW_TEXTS.length));
+  // beberapa ulasan negatif yang tetap tampil (ulasan nyata tidak selalu bagus)
+  const lowIdx = new Set<number>();
+  const lowPool = shuffle(reviewedItems.filter((r) => !namedBuyers.includes(r.order.user)));
+  [2, 2, 1, 3, 3].forEach((rt, i) => {
+    const r = lowPool[i];
+    if (!r) return;
+    r.rating = rt;
+    r.text = pick(COMMENTS_BY_RATING[rt]);
+    lowIdx.add(r.idx);
+  });
+  const hiddenIdx = new Set(shuffle(reviewedItems.filter((r) => NOW.getTime() - r.at.getTime() > 4 * DAY && !namedBuyers.includes(r.order.user) && !lowIdx.has(r.idx)).map((r) => r.idx)).slice(0, HIDDEN_REVIEW_TEXTS.length));
   let hi = 0;
   for (const r of reviewedItems) {
     const o = r.order;
