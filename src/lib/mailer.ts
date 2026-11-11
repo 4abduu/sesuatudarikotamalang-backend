@@ -1,4 +1,5 @@
 import { Resend } from "resend";
+import { logger } from "../logger";
 
 /* ------------------------------------------------------------------ */
 /* Brand tokens (mirror globals.css so email matches the app)         */
@@ -268,8 +269,9 @@ export async function sendOtpEmail(
 ): Promise<{ id: string } | unknown> {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
-    console.warn("[WARN] RESEND_API_KEY belum diisi di .env. Email OTP tidak benar-benar dikirim.");
-    console.log(`[SIMULASI OTP] Tujuan: ${to} | Kode: ${code} | Tujuan: ${purpose}`);
+    logger.warn({ purpose }, "RESEND_API_KEY kosong, OTP disimulasikan");
+    // OTP hanya dicatat di lingkungan non-produksi agar alur tes lokal tetap dapat digunakan.
+    if (process.env.NODE_ENV !== "production") logger.warn({ purpose, code }, "OTP simulasi");
     return { id: "simulated-otp" };
   }
 
@@ -288,7 +290,7 @@ export async function sendOtpEmail(
 
   // F-08: Resend API v6 mengembalikan { data, error }, bukan melempar exception
   if (result.error) {
-    console.error("[RESEND ERROR]", result.error);
+    logger.error({ err: result.error }, "resend gagal");
     throw {
       status: 502,
       message: `Gagal mengirim email OTP: ${result.error.message || "Layanan email bermasalah"}`,

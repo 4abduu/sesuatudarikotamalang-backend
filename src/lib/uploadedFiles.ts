@@ -4,6 +4,7 @@
  * Semua kolom foto yang ada di schema harus dicatat di collectReferencedUrls().
  */
 import prisma from "./prisma";
+import { logger } from "../logger";
 import { deleteFromCloudinary } from "./cloudinary";
 
 // ---------------------------------------------------------------------------
@@ -108,7 +109,7 @@ export async function releaseUrls(
     try {
       await deleteFromCloudinary(row.publicId, row.resourceType);
     } catch (err) {
-      console.error(`[releaseUrls] Cloudinary gagal menghapus ${row.publicId}:`, err);
+      logger.error({ err, publicId: row.publicId }, "releaseUrls Cloudinary gagal menghapus");
       failed++;
       continue; // biarkan baris agar job bisa coba lagi (R3)
     }
@@ -116,7 +117,7 @@ export async function releaseUrls(
       await prisma.uploadedFile.delete({ where: { id: row.id } });
       deleted++;
     } catch (err) {
-      console.error(`[releaseUrls] Gagal hapus baris uploaded_files ${row.id}:`, err);
+      logger.error({ err, rowId: row.id }, "releaseUrls gagal hapus baris uploaded_files");
       failed++;
     }
   }
@@ -148,7 +149,7 @@ export async function purgeOrphanUploads(
     try {
       await deleteFromCloudinary(row.publicId, row.resourceType);
     } catch (err) {
-      console.error(`[purgeOrphanUploads] Cloudinary gagal ${row.publicId}:`, err);
+      logger.error({ err, publicId: row.publicId }, "purgeOrphanUploads Cloudinary gagal");
       failed++;
       continue;
     }
@@ -156,7 +157,7 @@ export async function purgeOrphanUploads(
       await prisma.uploadedFile.delete({ where: { id: row.id } });
       deleted++;
     } catch (err) {
-      console.error(`[purgeOrphanUploads] Gagal hapus baris ${row.id}:`, err);
+      logger.error({ err, rowId: row.id }, "purgeOrphanUploads gagal hapus baris");
       failed++;
     }
   }

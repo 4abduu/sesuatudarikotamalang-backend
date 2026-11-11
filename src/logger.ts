@@ -18,7 +18,7 @@ export const logger = pino({
 
 export const requestLogger = pinoHttp({
   logger,
-  autoLogging: false,
+  autoLogging: { ignore: (req) => req.url === "/" || (req.url ?? "").startsWith("/uploads") },
   customProps: (rawReq) => {
     const req = rawReq as typeof rawReq & { res: { locals: { requestId?: string } }; user?: { id?: string } };
     return {

@@ -1,6 +1,28 @@
 import { Request, Response, NextFunction } from "express";
 import { uploadBuffer, deleteFromCloudinary } from "../lib/cloudinary";
-import prisma from "../lib/prisma";
+import { moderateImage } from "../lib/imageModeration";
+import { HttpError } from "../lib/httpError";
+import { logger } from "../logger";
+
+async function getPrisma() {
+  return (await import("../lib/prisma")).default;
+}
+
+async function moderateOrReject(req: Request, files: Express.Multer.File[]) {
+  const results: Array<{ allowed: boolean; categories: string[] }> = [];
+  for (let start = 0; start < files.length; start += 3) {
+    const batch = files.slice(start, start + 3);
+    results.push(...await Promise.all(batch.map((file) => moderateImage(file.buffer, file.mimetype))));
+  }
+  const rejectedIndexes = results.map((result, index) => result.allowed ? -1 : index).filter((index) => index >= 0);
+  if (rejectedIndexes.length > 0) {
+    const categories = [...new Set(rejectedIndexes.flatMap((index) => results[index].categories))];
+    logger.warn({ requestId: req.res?.locals.requestId, userId: req.user?.id, categories }, "gambar ditolak moderasi");
+    const error = new HttpError(422, "Foto tidak dapat diunggah karena mengandung konten yang tidak pantas", "IMAGE_REJECTED");
+    (error as any).rejectedIndexes = rejectedIndexes;
+    throw error;
+  }
+}
 
 // Controller untuk menangani upload file tunggal atau jamak
 
@@ -9,6 +31,7 @@ export const uploadSingle = async (req: Request, res: Response, next: NextFuncti
     if (!req.file) {
       return res.status(400).json({ error: "Tidak ada file yang diunggah" });
     }
+    await moderateOrReject(req, [req.file]);
 
     const uploaded = await uploadBuffer(req.file.buffer, {
       filename: req.file.originalname,
@@ -17,6 +40,7 @@ export const uploadSingle = async (req: Request, res: Response, next: NextFuncti
 
     // Catat ke uploaded_files; bila gagal, kompensasi: hapus dari Cloudinary
     try {
+      const prisma = await getPrisma();
       await prisma.uploadedFile.create({
         data: {
           publicId: uploaded.public_id,
@@ -55,6 +79,7 @@ export const uploadMultiple = async (req: Request, res: Response, next: NextFunc
     if (!files || files.length === 0) {
       return res.status(400).json({ error: "Tidak ada file yang diunggah" });
     }
+    await moderateOrReject(req, files);
 
     const uploadedFiles: Array<{
       url: string;
@@ -82,6 +107,7 @@ export const uploadMultiple = async (req: Request, res: Response, next: NextFunc
 
       // Catat ke uploaded_files; bila gagal, rollback semua termasuk yang baru
       try {
+        const prisma = await getPrisma();
         await prisma.uploadedFile.create({
           data: {
             publicId: uploaded.public_id,

@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
-import { createReviewForUser, listMyReviews as listMyReviewsDal } from "../dal/reviews";
+import { createReviewForUser, listMyReviews as listMyReviewsDal, countMyReviews } from "../dal/reviews";
 import prisma from "../lib/prisma";
+import { parsePagination, buildPagination } from "../lib/pagination";
 
 // GET /api/reviews — List ulasan publik (dukung filter productId)
 export const listReviews = async (req: Request, res: Response, next: NextFunction) => {
@@ -89,9 +90,11 @@ export const listMyReviews = async (req: Request, res: Response, next: NextFunct
       return res.status(401).json({ error: "Belum login" });
     }
 
-    const reviews = await listMyReviewsDal(req.user);
-
-    res.json({ reviews });
+    const pagination = parsePagination(req.query, { defaultLimit: 10, maxLimit: 100 });
+    const reviews = await listMyReviewsDal(req.user, pagination);
+    if (!pagination) return res.json({ reviews });
+    const total = await countMyReviews(req.user);
+    return res.json({ reviews, pagination: buildPagination(pagination.page, pagination.limit, total) });
   } catch (err) {
     next(err);
   }

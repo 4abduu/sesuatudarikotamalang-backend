@@ -3,6 +3,8 @@ import crypto from "crypto";
 import prisma from "../lib/prisma";
 import { effectiveStock } from "../lib/stock";
 import { isPaymentSuccess } from "../lib/paymentStatus";
+import { createNotification, createOrderSoldNotifications } from "../dal/notifications";
+import { logger } from "../logger";
 
 // POST /api/payments/webhook — Terima Notifikasi Webhook dari Server Midtrans (TANPA requireAuth)
 export const handleWebhook = async (req: Request, res: Response, next: NextFunction) => {
@@ -138,6 +140,9 @@ export const handleWebhook = async (req: Request, res: Response, next: NextFunct
             });
           }
 
+          await createNotification(tx, { userId: freshOrder.userId, type: "pesanan_update", title: "Pembayaran berhasil", body: `Pembayaran pesanan ${freshOrder.orderNumber} berhasil. Pesananmu kini lunas.` });
+          await createOrderSoldNotifications(tx, freshOrder.orderNumber, freshOrder.items);
+
           await tx.payment.upsert({
             where: { orderId: freshOrder.id },
             create: {
@@ -198,6 +203,7 @@ export const handleWebhook = async (req: Request, res: Response, next: NextFunct
                 data: { soldCount: { increment: item.quantity } },
               });
             }
+            await createOrderSoldNotifications(tx, freshOrder.orderNumber, freshOrder.items);
 
             // Buat notifikasi HANYA jika pembayaran settlement belum pernah tercatat sebelumnya
             if (!existingPayment || existingPayment.status !== "settlement") {
@@ -305,7 +311,7 @@ export const handleWebhook = async (req: Request, res: Response, next: NextFunct
 
     res.status(200).json({ received: true, status: resultStatus });
   } catch (err) {
-    console.error("[MIDTRANS WEBHOOK ERROR]", err);
+    logger.error({ err, requestId: res.locals.requestId }, "midtrans webhook gagal");
     next(err);
   }
 };

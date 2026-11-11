@@ -1,13 +1,19 @@
 import prisma from "../lib/prisma";
 import { badRequest, forbidden, notFound } from "./errors";
 import { AuthUser } from "./types";
+import { assertCleanText } from "../lib/contentFilter";
 
-export function listMyReviews(user: AuthUser) {
+export function listMyReviews(user: AuthUser, pagination?: { page: number; limit: number }) {
   return prisma.review.findMany({
     where: { userId: user.id },
     include: { product: { select: { id: true, name: true, images: true, slug: true } } },
     orderBy: { createdAt: "desc" },
+    ...(pagination ? { skip: (pagination.page - 1) * pagination.limit, take: pagination.limit } : {}),
   });
+}
+
+export function countMyReviews(user: AuthUser) {
+  return prisma.review.count({ where: { userId: user.id } });
 }
 
 export async function createReviewForUser(
@@ -45,6 +51,7 @@ export async function createReviewForUser(
   }
 
   const trimmedComment = comment.trim();
+  assertCleanText("Komentar ulasan", trimmedComment);
   let review;
   try {
     review = await prisma.review.create({

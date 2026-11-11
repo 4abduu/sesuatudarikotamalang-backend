@@ -2,6 +2,8 @@ import { Request, Response, NextFunction } from "express";
 import prisma from "../lib/prisma";
 import { applyStockChange } from "../lib/stock";
 import { HttpError } from "../lib/httpError";
+import { createNotification } from "../dal/notifications";
+import { logger } from "../logger";
 
 const reasons = ["barang_masuk", "opname", "terjual_kasir", "rusak_hilang", "koreksi"];
 
@@ -10,6 +12,12 @@ export const adjustStock = async (req: Request, res: Response, next: NextFunctio
     const { productId, variantId, delta, reason, note } = req.body;
     if (typeof productId !== "string" || (variantId !== undefined && variantId !== null && typeof variantId !== "string") || !Number.isInteger(delta) || delta === 0 || !reasons.includes(reason) || (note !== undefined && note !== null && (typeof note !== "string" || note.length > 200))) throw new HttpError(400, "Data penyesuaian stok tidak valid", "VALIDATION_ERROR");
     const result = await prisma.$transaction((tx) => applyStockChange(tx, { productId, variantId, delta, reason, note, actorId: req.user?.id }));
+    try {
+      const product = await prisma.product.findUnique({ where: { id: productId }, select: { name: true, artisan: { select: { userId: true } } } });
+      if (product?.artisan.userId) await createNotification(prisma, { userId: product.artisan.userId, type: "stok_menipis", title: "Stok disesuaikan admin", body: `Stok produk ${product.name} disesuaikan admin dengan alasan ${reason}.` });
+    } catch (notificationError) {
+      logger.warn({ err: notificationError, productId }, "notifikasi penyesuaian stok gagal dibuat");
+    }
     res.json({ message: "Stok berhasil disesuaikan", movement: result.movement, stock: result.stock });
   } catch (err) { next(err); }
 };

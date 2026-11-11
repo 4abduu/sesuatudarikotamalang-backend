@@ -20,13 +20,18 @@ export async function applyStockChange(
   const aggregate = await tx.productVariant.aggregate({ where: { productId: input.productId }, _sum: { stock: true } });
   const product = await tx.product.findUnique({ where: { id: input.productId }, include: { artisan: true } });
   if (product) {
+    const totalStock = aggregate._sum.stock ?? 0;
+    const previousTotalStock = totalStock - input.delta;
     const settings = await tx.appSettings.findUnique({ where: { id: 1 } });
     const threshold = settings?.lowStockThreshold ?? 5;
-    if ((aggregate._sum.stock ?? 0) > threshold && product.lowStockNotifiedAt) {
-      await tx.product.update({ where: { id: product.id }, data: { lowStockNotifiedAt: null } });
-    } else if ((aggregate._sum.stock ?? 0) <= threshold && !product.lowStockNotifiedAt && product.artisan.userId) {
+    if (previousTotalStock > 0 && totalStock === 0 && product.artisan.userId) {
       await tx.product.update({ where: { id: product.id }, data: { lowStockNotifiedAt: new Date() } });
-      await tx.notification.create({ data: { userId: product.artisan.userId, type: "stok_menipis", title: "Stok menipis", body: `Stok produk ${product.name} menipis (${aggregate._sum.stock ?? 0}).` } });
+      await tx.notification.create({ data: { userId: product.artisan.userId, type: "stok_menipis", title: "Stok habis", body: `Stok produk ${product.name} habis.` } });
+    } else if (totalStock > threshold && product.lowStockNotifiedAt) {
+      await tx.product.update({ where: { id: product.id }, data: { lowStockNotifiedAt: null } });
+    } else if (totalStock <= threshold && !product.lowStockNotifiedAt && product.artisan.userId) {
+      await tx.product.update({ where: { id: product.id }, data: { lowStockNotifiedAt: new Date() } });
+      await tx.notification.create({ data: { userId: product.artisan.userId, type: "stok_menipis", title: "Stok menipis", body: `Stok produk ${product.name} menipis (${totalStock}).` } });
     }
   }
   return { movement, stock: stockAfter };

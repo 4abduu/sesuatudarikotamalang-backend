@@ -19,10 +19,11 @@ export const errorHandler: ErrorRequestHandler = (err: any, req: Request, res: R
   }, "request error");
 
   const knownMessage = err instanceof HttpError || statusCode < 500;
-  const response: { error: string; code?: string; requestId?: string } = {
+  const response: { error: string; code?: string; requestId?: string; rejectedIndexes?: number[] } = {
     error: statusCode >= 500 ? "Terjadi kesalahan pada server." : (knownMessage ? err.message : "Terjadi kesalahan pada server."),
     ...(statusCode >= 500 ? { code: "INTERNAL_ERROR" } : err instanceof HttpError && err.code ? { code: err.code } : {}),
   };
+  if (statusCode === 422 && Array.isArray(err?.rejectedIndexes)) response.rejectedIndexes = err.rejectedIndexes;
   if (requestId) response.requestId = requestId;
   res.status(statusCode).json(response);
 };

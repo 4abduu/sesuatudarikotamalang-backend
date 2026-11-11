@@ -10,6 +10,7 @@ import { isAllowedAvatarUrl } from "../lib/avatar";
 import { isEmail, isPasswordWithinBcryptLimit, isString } from "../lib/validate";
 import { generateOtp, hashOtp, verifyOtpHash } from "../lib/otp";
 import { extractBearerToken } from "../middleware/authMiddleware";
+import { assertCleanText } from "../lib/contentFilter";
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
@@ -22,6 +23,7 @@ function issueToken(userId: string, role: string): string {
 export const register = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { name, email, password } = req.body;
+    assertCleanText("Nama", name);
     if (!isString(name, { min: 2, max: 80 }) || !isEmail(email) || !isString(password) || !password) {
       return res.status(400).json({ error: "name, email, password wajib diisi" });
     }
@@ -551,6 +553,7 @@ export const updateProfile = async (req: Request, res: Response, next: NextFunct
     }
 
     const { name, avatarUrl } = req.body;
+    if (name !== undefined) assertCleanText("Nama", name);
 
     // Minimal satu field harus disediakan
     if (name === undefined && avatarUrl === undefined) {

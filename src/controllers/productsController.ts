@@ -12,6 +12,7 @@ import { getOfficialArtisan } from "../lib/officialStore";
 import { validateImageVariants, normalizeImageOrder, pruneImageVariants } from "../lib/productImages";
 import { presentArtisan } from "../lib/presentArtisan";
 import { serializeProductStatus } from "../lib/productStatus";
+import { assertCleanFields } from "../lib/contentFilter";
 
 // Helper untuk membuat slug sederhana dari nama produk
 function createSlug(name: string): string {
@@ -274,9 +275,16 @@ export const createProduct = async (req: Request, res: Response, next: NextFunct
     if (parsedImages === null) {
       return res.status(400).json({ error: "images harus berupa array URL HTTPS" });
     }
+    if (parsedImages.length < 1) {
+      return res.status(400).json({ error: "Minimal 1 foto produk", code: "PHOTO_REQUIRED" });
+    }
     // Batas maks 10 foto per produk (Langkah 6)
     if (parsedImages.length > 10) {
       return res.status(400).json({ error: "Foto produk maksimal 10" });
+    }
+    if (req.user.role === "creator") {
+      assertCleanFields({ "Nama produk": name, "Deskripsi produk": description, "Deskripsi singkat": shortDescription });
+      if (Array.isArray(variantOptions)) for (const option of variantOptions) assertCleanFields({ "Nama opsi varian": option?.name, "Nilai opsi varian": Array.isArray(option?.values) ? option.values.join(" ") : option?.values });
     }
     if (shopeeUrl !== undefined && shopeeUrl !== null && !isHttpsUrl(shopeeUrl)) {
       return res.status(400).json({ error: "shopeeUrl harus berupa URL HTTPS" });
@@ -333,6 +341,13 @@ export const createProduct = async (req: Request, res: Response, next: NextFunct
       const replacement = await prisma.product.findUnique({ where: { id: replacesProductId } });
       if (!replacement || replacement.artisanId !== artisanId || !replacement.withdrawnAt) {
         return res.status(400).json({ error: "Produk pengganti harus milik kreator yang sama dan sudah ditarik", code: "INVALID_REPLACEMENT" });
+      }
+      const existingReplacement = await prisma.product.findFirst({
+        where: { replacesProductId, approvalStatus: { in: ["menunggu", "disetujui"] } },
+        select: { id: true },
+      });
+      if (existingReplacement) {
+        return res.status(409).json({ error: "Produk pengganti untuk produk ini sudah diajukan", code: "REPLACEMENT_ALREADY_EXISTS" });
       }
     }
 
@@ -467,6 +482,9 @@ export const updateProduct = async (req: Request, res: Response, next: NextFunct
 
     const { id } = req.params;
     const editableProduct = await getEditableProduct(req.user, id);
+    if (req.user.role === "creator" && editableProduct.withdrawnAt) {
+      throw new HttpError(403, "Produk yang sudah ditarik tidak dapat diedit", "PRODUCT_LOCKED");
+    }
 
     const {
       name,
@@ -499,6 +517,7 @@ export const updateProduct = async (req: Request, res: Response, next: NextFunct
     if (description !== undefined && !isString(description)) {
       return res.status(400).json({ error: "description harus berupa teks" });
     }
+    if (req.user.role === "creator") assertCleanFields({ "Nama produk": name, "Deskripsi produk": description, "Deskripsi singkat": shortDescription });
     if (categoryId !== undefined) {
       if (typeof categoryId !== "string" || !categoryId) {
         return res.status(400).json({ error: "categoryId harus berupa string" });
@@ -527,6 +546,9 @@ export const updateProduct = async (req: Request, res: Response, next: NextFunct
 
     // Hitung images akhir, imageVariants akhir, lalu normalize urutan (semantik PUT 2.5 nomor 6)
     const finalImages = images !== undefined ? (Array.isArray(images) ? images : []) : undefined;
+    if (finalImages !== undefined && finalImages.length < 1) {
+      return res.status(400).json({ error: "Minimal 1 foto produk", code: "PHOTO_REQUIRED" });
+    }
     if (finalImages !== undefined && finalImages.length > 10) {
       return res.status(400).json({ error: "Foto produk maksimal 10" });
     }
@@ -641,6 +663,7 @@ export const upsertStory = async (req: Request, res: Response, next: NextFunctio
 
     const { id } = req.params;
     const { title, content, process, coverImageUrl, processImages } = req.body;
+    if (req.user.role === "creator") assertCleanFields({ "Judul cerita": title, "Isi cerita": content, "Proses cerita": process });
 
     if (!isString(title, { max: 191 }) || !title.trim() || !isString(content, { max: 10000 }) || !content.trim()) {
       return res.status(400).json({ error: "title dan content cerita wajib diisi" });
@@ -745,8 +768,15 @@ export const listMyProducts = async (req: Request, res: Response, next: NextFunc
     const productsWithStock = products.map((p) => {
       const stats = ratingMap[p.id] || { avgRating: 0, reviewCount: 0 };
       const variants = allVariantsWithStock.filter((variant) => p.variants.some((item) => item.id === variant.id));
-      return serializeProduct({ ...p, avgRating: stats.avgRating, reviewCount: stats.reviewCount, variants });
+      return serializeProduct({ ...p, avgRating: stats.avgRating, reviewCount: stats.reviewCount, variants, replacedByProductId: null });
     });
+
+    const replacements = products.length === 0 ? [] : await prisma.product.findMany({
+      where: { replacesProductId: { in: products.map((p) => p.id) }, approvalStatus: { in: ["menunggu", "disetujui"] } },
+      select: { id: true, replacesProductId: true },
+    });
+    const replacementMap = new Map(replacements.map((p) => [p.replacesProductId as string, p.id]));
+    for (const product of productsWithStock) product.replacedByProductId = replacementMap.get(product.id) ?? null;
 
     res.json({ products: productsWithStock });
   } catch (err) {

@@ -1,5 +1,6 @@
 import cron from "node-cron";
 import { purgeOrphanUploads } from "../lib/uploadedFiles";
+import { logger } from "../logger";
 
 const DEFAULT_GRACE_HOURS = 24;
 const MIN_GRACE_HOURS = 1;
@@ -21,10 +22,10 @@ export function startUploadCleanupJob(): void {
   cron.schedule("0 4 * * *", async () => {
     try {
       const result = await runUploadCleanup();
-      console.log(`[JOB] Upload cleanup selesai: ${result.deleted} dihapus, ${result.kept} dipertahankan, ${result.failed} gagal`);
+      logger.info(result, "upload cleanup selesai");
     } catch (error) {
-      console.error("[JOB ERROR] Gagal menjalankan upload cleanup:", error);
+      logger.error({ err: error }, "gagal menjalankan upload cleanup");
     }
   });
-  console.log("[JOB] Scheduled job pembersihan file yatim Cloudinary berhasil diaktifkan (setiap hari pukul 04:00)");
+  logger.info("scheduled job pembersihan file yatim Cloudinary berhasil diaktifkan");
 }

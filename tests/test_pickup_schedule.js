@@ -49,6 +49,11 @@ function mockReqRes(body = {}, user = null, params = {}, query = {}) {
   try {
     snapshot = await snapshotSlots(prisma);
     await ensureDefaultSlots(prisma);
+    await prisma.appSettings.upsert({
+      where: { id: 1 },
+      create: { id: 1, pickupOpenTime: "09:00", pickupCloseTime: "23:00", pickupLeadMinutes: 30 },
+      update: { pickupOpenTime: "09:00", pickupCloseTime: "23:00", pickupLeadMinutes: 30 },
+    });
 
     const adminUser = { id: `admin-${Date.now()}`, role: "admin" };
     const buyerUser = { id: `buyer-${Date.now()}`, role: "buyer" };

@@ -9,6 +9,9 @@ import { toWibDateString, todayWibString } from "../lib/dates";
 import { cancelOrderForUser, getOrderForUser, listMyOrders } from "../dal/orders";
 import { computeRefund } from "../lib/refund";
 import { addHolidayFields, holidayInfoFor, loadHolidayContext } from "../lib/holidays";
+import { createNotification } from "../dal/notifications";
+import { logger } from "../logger";
+import { parsePagination, buildPagination } from "../lib/pagination";
 
 // GET /api/orders — Riwayat pesanan milik user yang sedang login
 export const listOrders = async (req: Request, res: Response, next: NextFunction) => {
@@ -17,8 +20,11 @@ export const listOrders = async (req: Request, res: Response, next: NextFunction
       return res.status(401).json({ error: "Belum login" });
     }
 
-    const orders = await listMyOrders(req.user);
-    res.json({ orders });
+    const pagination = parsePagination(req.query, { defaultLimit: 10, maxLimit: 50 });
+    const result = await listMyOrders(req.user, pagination);
+    if (!pagination && Array.isArray(result)) return res.json({ orders: result });
+    if (!pagination || Array.isArray(result)) return res.json({ orders: [] });
+    return res.json({ orders: result.orders, pagination: buildPagination(pagination.page, pagination.limit, result.total) });
   } catch (err) {
     next(err);
   }
@@ -235,8 +241,8 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
         },
       });
 
-      if (!product || !product.isActive) {
-        throw { status: 404, message: "Produk tidak ditemukan atau sedang tidak aktif" };
+      if (!product || !product.isActive || product.approvalStatus !== "disetujui" || product.withdrawnAt) {
+        throw { status: 409, message: "Produk tidak tersedia untuk dipesan", code: "PRODUCT_UNAVAILABLE" };
       }
 
       // F-13: Blokir pemesanan produk milik kreator nonaktif
@@ -345,6 +351,17 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
     }
 
     // Jika paymentMethod === "midtrans", buat Snap Transaction Token
+    try {
+      await createNotification(prisma, {
+        userId: req.user.id,
+        type: "pesanan_update",
+        title: "Reservasi berhasil dibuat",
+        body: `Reservasi ${newOrder.orderNumber} berhasil dibuat dengan metode ${paymentMethod === "midtrans" ? "Midtrans" : "COD"}. Batas hold: ${newOrder.holdExpiresAt?.toISOString() ?? "tidak ada"}.`,
+      });
+    } catch (notificationError) {
+      logger.warn({ err: notificationError, orderId: newOrder.id }, "notifikasi reservasi gagal dibuat");
+    }
+
     let snapResponse: any = null;
     if (paymentMethod === "midtrans") {
       try {
@@ -379,8 +396,8 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
             status: "pending",
           },
         });
-      } catch (midtransErr) {
-        console.error("[MIDTRANS ERROR] Gagal membuat Snap Transaction:", midtransErr);
+      } catch (midtransErr: any) {
+        logger.error({ requestId: res.locals.requestId, message: midtransErr?.message, httpStatusCode: midtransErr?.httpStatusCode }, "midtrans snap gagal");
         // Tetap kembalikan order, tapi tandai snapResponse error
         snapResponse = { error: "Gagal membuat transaksi Midtrans. Silakan coba lagi." };
       }

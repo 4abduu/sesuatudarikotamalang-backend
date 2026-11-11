@@ -86,7 +86,13 @@ async function runTests() {
   const userA = { id: BUYER_A, role: "buyer" };
   const userB = { id: BUYER_B, role: "buyer" };
   const userC = { id: BUYER_C, role: "buyer" };
-  const baseInput = { applicantName: "Test", contact: "081", description: "Tes brand unik", categoryId: CATEGORY_ID };
+  const baseInput = {
+    applicantName: "Test",
+    contact: "081",
+    description: "Tes brand unik",
+    categoryId: CATEGORY_ID,
+    samplePhotos: ["https://example.test/sample-brand.jpg"],
+  };
 
   // ── Normalisasi ────────────────────────────────────────────────────────────
   // "Dini Draws", "dini.draws", "DINI  DRAWS" harus punya kunci yang sama

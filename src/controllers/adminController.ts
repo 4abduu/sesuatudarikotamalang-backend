@@ -8,6 +8,8 @@ import { normalizeBrandKey } from "../lib/brandKey";
 import { presentArtisan } from "../lib/presentArtisan";
 import { addHolidayFields } from "../lib/holidays";
 import { serializeProductStatus } from "../lib/productStatus";
+import { createNotification, createOrderSoldNotifications } from "../dal/notifications";
+import { logger } from "../logger";
 
 // GET /api/admin/dashboard — ringkasan statcard + data grafik dashboard admin
 export const getDashboard = async (req: Request, res: Response, next: NextFunction) => {
@@ -55,14 +57,14 @@ export const getDashboard = async (req: Request, res: Response, next: NextFuncti
       prisma.productVariant.count({
         where: {
           stock: { lte: lowStockThreshold },
-          product: { isActive: true },
+          product: { isActive: true, approvalStatus: "disetujui", withdrawnAt: null },
         },
       }),
       // 4b. Daftar varian stok menipis (maks 10, terendah dulu) untuk kartu "Perlu Restock"
       prisma.productVariant.findMany({
         where: {
           stock: { lte: lowStockThreshold },
-          product: { isActive: true },
+          product: { isActive: true, approvalStatus: "disetujui", withdrawnAt: null },
         },
         orderBy: { stock: "asc" },
         take: 10,
@@ -79,7 +81,7 @@ export const getDashboard = async (req: Request, res: Response, next: NextFuncti
       }),
       // 6. A7: Produk terlaris dengan totalRevenue (via OrderItem)
       prisma.product.findMany({
-        where: { isActive: true, soldCount: { gt: 0 } },
+        where: { isActive: true, approvalStatus: "disetujui", withdrawnAt: null, soldCount: { gt: 0 } },
         orderBy: { soldCount: "desc" },
         take: 5,
         select: {
@@ -588,6 +590,7 @@ export const updateOrderStatus = async (req: Request, res: Response, next: NextF
             data: { soldCount: { increment: item.quantity } },
           });
         }
+        await createOrderSoldNotifications(tx, order.orderNumber, order.items);
       }
 
       // 4. Kirim notifikasi in-app ke pengguna mengenai perubahan status pesanan
@@ -697,6 +700,13 @@ export const extendOrderHold = async (req: Request, res: Response, next: NextFun
       },
     });
 
+    try {
+      await createNotification(prisma, { userId: order.userId, type: "pesanan_update", title: "Hold pesanan diperpanjang", body: `Batas hold pesanan ${order.orderNumber} diperpanjang sampai ${newHoldExpiresAt.toISOString()}.` });
+    } catch (notificationError) {
+      // Notifikasi bukan alasan untuk menggagalkan perpanjangan hold.
+      logger.warn({ err: notificationError, orderId: order.id }, "notifikasi perpanjangan hold gagal dibuat");
+    }
+
     const [decoratedOrder] = await addHolidayFields([updatedOrder]);
     res.json({
       message: `Waktu hold berhasil diperpanjang ${additionalMinutes} menit`,
@@ -774,7 +784,10 @@ export const verifyScanQr = async (req: Request, res: Response, next: NextFuncti
               data: { soldCount: { increment: item.quantity } },
             });
           }
+          await createOrderSoldNotifications(tx, order.orderNumber, order.items);
         }
+
+        await createNotification(tx, { userId: order.userId, type: "pesanan_update", title: "Pesanan selesai", body: `Pesanan ${order.orderNumber} selesai diambil. Jangan lupa beri ulasan.` });
 
         return updated;
       },
@@ -901,6 +914,9 @@ export const toggleReviewHide = async (req: Request, res: Response, next: NextFu
       where: { id },
       data: { status: newStatus },
     });
+    if (newStatus === "disembunyikan") {
+      await createNotification(prisma, { userId: review.userId, type: "umum", title: "Ulasan disembunyikan", body: "Ulasanmu disembunyikan oleh admin karena tidak sesuai ketentuan." });
+    }
 
     res.json({ message: `Status ulasan diubah menjadi '${newStatus}'`, review: updated });
   } catch (err) {
@@ -919,6 +935,7 @@ export const deleteReview = async (req: Request, res: Response, next: NextFuncti
     }
 
     await prisma.review.delete({ where: { id } });
+    await createNotification(prisma, { userId: review.userId, type: "umum", title: "Ulasan dihapus", body: "Ulasanmu dihapus oleh admin karena tidak sesuai ketentuan." });
     res.json({ message: "Ulasan berhasil dihapus" });
   } catch (err) {
     next(err);
@@ -944,6 +961,9 @@ export const toggleArtisanStatus = async (req: Request, res: Response, next: Nex
       where: { id },
       data: { status: newStatus },
     });
+    if (artisan.userId) {
+      await createNotification(prisma, { userId: artisan.userId, type: "umum", title: `Akun kreator ${newStatus}`, body: `Akun kreatormu telah ${newStatus === "aktif" ? "diaktifkan" : "dinonaktifkan"} oleh admin.` });
+    }
 
     res.json({ message: `Status kreator berhasil diubah menjadi '${newStatus}'`, artisan: updated });
   } catch (err) {
@@ -1029,6 +1049,9 @@ export const updateArtisanRevenueShare = async (req: Request, res: Response, nex
     if (artisan.isOfficial) throw new HttpError(400, "Official Store tidak dapat diubah bagi hasilnya", "OFFICIAL_STORE_PROTECTED");
     const settings = await prisma.appSettings.findUnique({ where: { id: 1 } });
     const updated = await prisma.artisan.update({ where: { id: artisan.id }, data: { creatorSharePercent } });
+    if (artisan.userId) {
+      await createNotification(prisma, { userId: artisan.userId, type: "umum", title: "Bagi hasil diperbarui", body: `Persentase bagi hasil kreatormu diubah menjadi ${updated.creatorSharePercent === null ? Number(settings?.defaultCreatorSharePercent ?? 70) : Number(updated.creatorSharePercent)}%.` });
+    }
     res.json({ message: "Bagi hasil kreator berhasil diperbarui", artisan: { id: updated.id, creatorSharePercent: updated.creatorSharePercent === null ? null : Number(updated.creatorSharePercent), effectiveCreatorSharePercent: Number(updated.creatorSharePercent ?? settings?.defaultCreatorSharePercent ?? 70) } });
   } catch (err) { next(err); }
 };
@@ -1139,6 +1162,18 @@ export const listProductApprovals = async (req: Request, res: Response, next: Ne
   } catch (err) { next(err); }
 };
 
+// GET /api/admin/products/:id — Detail produk admin, termasuk semua status.
+export const getAdminProductById = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const product = await prisma.product.findUnique({
+      where: { id: req.params.id },
+      include: { category: true, artisan: { include: { user: { select: { avatarUrl: true } } } }, variantOptions: true, variants: true, story: true },
+    });
+    if (!product) throw new HttpError(404, "Produk tidak ditemukan", "NOT_FOUND");
+    res.json({ product: serializeProductStatus({ ...product, artisan: presentArtisan(product.artisan) }) });
+  } catch (err) { next(err); }
+};
+
 async function productApprovalAction(
   req: Request,
   res: Response,
@@ -1161,6 +1196,9 @@ async function productApprovalAction(
     if (action === "hide" && (product.approvalStatus !== "disetujui" || !product.isActive || !!product.withdrawnAt)) throw new HttpError(409, "Produk tidak berada pada status yang dapat disembunyikan", "INVALID_STATE");
     if (action === "withdraw" && product.withdrawnAt) throw new HttpError(409, "Produk sudah ditarik", "ALREADY_WITHDRAWN");
     if (action === "withdraw" && product.approvalStatus !== "disetujui") throw new HttpError(409, "Hanya produk yang disetujui yang dapat ditarik", "INVALID_STATE");
+    if (action === "approve" && (!Array.isArray(product.images) || (product.images as unknown[]).length < 1)) {
+      throw new HttpError(409, "Minimal 1 foto produk", "PHOTO_REQUIRED");
+    }
 
     const updated = await prisma.$transaction(async (tx) => {
       const data: any = action === "approve"
@@ -1201,12 +1239,15 @@ export const toggleProductActive = async (req: Request, res: Response, next: Nex
     if (!product) {
       return res.status(404).json({ error: "Produk tidak ditemukan" });
     }
+    if (isActive && product.approvalStatus !== "disetujui") {
+      throw new HttpError(409, "Gunakan Setujui pada halaman Persetujuan", "USE_APPROVAL_FLOW");
+    }
 
     const updated = await prisma.product.update({
       where: { id },
       data: {
         isActive,
-        ...(isActive ? { withdrawnAt: null, statusNote: null, approvalStatus: "disetujui" } : {}),
+        ...(isActive && product.withdrawnAt ? { withdrawnAt: null } : {}),
       },
     });
 
@@ -1449,6 +1490,7 @@ export default {
   listAdminArtisans,
   updateArtisanRevenueShare,
   listAdminProducts,
+  getAdminProductById,
   listProductApprovals,
   approveProduct,
   rejectProduct,

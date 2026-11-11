@@ -268,7 +268,13 @@ async function runTests() {
 
   // Buyer mengajukan → 201
   const mApplyBuyer = mockReqRes(
-    { applicantName: "Test", contact: "08123", brandName: `BrandNew${ts}`, description: "Desc" },
+    {
+      applicantName: "Test",
+      contact: "08123",
+      brandName: `BrandNew${ts}`,
+      description: "Desc",
+      samplePhotos: ["https://example.test/sample-photo.jpg"],
+    },
     user
   );
   await applyConsignment(mApplyBuyer.req, mApplyBuyer.res, mApplyBuyer.next);

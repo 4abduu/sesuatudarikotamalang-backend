@@ -75,6 +75,8 @@ const suites = [
   "test_admin_avatar_moderation.js",     // Langkah 10: listAdminUsers, resetUserAvatar, resetArtisanAvatar
   "test_creator_application_flow.js",    // Langkah 10: samplePhotos batas 10, approve, reject, proteksi admin
   "test_brand_name_unique.js",           // Profil Toko Langkah 7: normalisasi brandKey, 409 bentrok, 400 invalid, approve aman
+  "test_moderation_pagination.js",
+  "test_notification_mutations.js",
   "test_artisan_effective_avatar.js",    // Profil Toko Langkah 7: avatarUrl efektif, ownAvatarUrl hanya owner/admin
   "test_artisan_bio.js",                 // Profil Toko Langkah 7: bio '' null spasi→null, 2000 OK, 2001 400, undefined tidak berubah
   // TIDAK dimasukkan: test_ai_integration.js (butuh server live + Gemini sungguhan)

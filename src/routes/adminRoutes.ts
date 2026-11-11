@@ -62,6 +62,8 @@ router.patch("/artisans/:id/revenue-share", adminController.updateArtisanRevenue
 // GET /api/admin/products — A5: Daftar seluruh produk (termasuk nonaktif)
 router.get("/products", adminController.listAdminProducts);
 router.get("/products/approvals", adminController.listProductApprovals);
+router.get("/products/slow-movers", slowMoverController.listSlowMovers);
+router.get("/products/:id", adminController.getAdminProductById);
 router.post("/products/:id/approve", adminController.approveProduct);
 router.post("/products/:id/reject", adminController.rejectProduct);
 router.post("/products/:id/hide", adminController.hideProduct);
@@ -86,7 +88,6 @@ router.post("/pickup-holidays", pickupHolidayController.createHoliday);
 router.delete("/pickup-holidays/:id", pickupHolidayController.deleteHoliday);
 router.post("/stock/adjust", stockController.adjustStock);
 router.get("/stock/movements", stockController.listStockMovements);
-router.get("/products/slow-movers", slowMoverController.listSlowMovers);
 router.get("/reports/monthly", reportController.getMonthlyReport);
 router.post("/reports/monthly/:month/finalize", reportController.finalizeMonthlyReport);
 router.post("/reports/monthly/:month/reopen", reportController.reopenMonthlyReport);

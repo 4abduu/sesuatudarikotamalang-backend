@@ -51,6 +51,7 @@ import { apiLimiter } from "./middleware/rateLimiter";
 import { requestId } from "./middleware/requestId";
 import { logger, requestLogger } from "./logger";
 import { errorHandler } from "./middleware/errorHandler";
+import compression from "compression";
 
 export { errorHandler } from "./middleware/errorHandler";
 
@@ -64,9 +65,13 @@ if (process.env.TRUST_PROXY && process.env.TRUST_PROXY !== "false" && process.en
   const trustValue = process.env.TRUST_PROXY === "true" ? 1 : isNaN(Number(process.env.TRUST_PROXY)) ? process.env.TRUST_PROXY : Number(process.env.TRUST_PROXY);
   app.set("trust proxy", trustValue);
 }
+if (process.env.NODE_ENV === "production" && !process.env.TRUST_PROXY) {
+  logger.warn("TRUST_PROXY belum diset: di belakang reverse proxy semua pengguna terlihat satu IP dan rate limit tidak berguna");
+}
 
 // Helmet — Security HTTP headers (HSTS, noSniff, XSS filter, dll.)
 app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
+if (process.env.COMPRESSION_ENABLED !== "false") app.use(compression());
 
 // Serve static uploaded files
 app.use("/uploads", express.static(path.join(__dirname, "../uploads")));

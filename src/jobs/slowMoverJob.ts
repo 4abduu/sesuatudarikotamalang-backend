@@ -1,6 +1,7 @@
 import cron from "node-cron";
 import prisma from "../lib/prisma";
 import { getSlowMovers } from "../lib/slowMovers";
+import { logger } from "../logger";
 
 export function startSlowMoverJob(): void {
   cron.schedule("0 7 * * *", async () => {
@@ -14,9 +15,9 @@ export function startSlowMoverJob(): void {
           await tx.notification.create({ data: { userId: product.artisan.userId!, type: "produk_mendekati_batas", title: "Produk mendekati batas evaluasi", body: `Produk ${product.name} tidak terjual selama ${mover.daysIdle} hari.` } });
         });
       }
-    } catch (error) { console.error("[JOB ERROR] slow mover:", error); }
+    } catch (error) { logger.error({ err: error }, "slow mover gagal"); }
   });
-  console.log("[JOB] Scheduled job slow mover berhasil diaktifkan");
+  logger.info("scheduled job slow mover berhasil diaktifkan");
 }
 
 export default { startSlowMoverJob };

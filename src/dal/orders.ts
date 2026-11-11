@@ -15,13 +15,17 @@ const orderInclude = {
   payment: true,
 } as const;
 
-export async function listMyOrders(user: AuthUser) {
+export async function listMyOrders(user: AuthUser, pagination?: { page: number; limit: number }) {
+  const where = { userId: user.id };
   const orders = await prisma.order.findMany({
-    where: { userId: user.id },
+    where,
     include: orderInclude,
     orderBy: { createdAt: "desc" },
+    ...(pagination ? { skip: (pagination.page - 1) * pagination.limit, take: pagination.limit } : {}),
   });
-  return addHolidayFields(orders);
+  if (!pagination) return addHolidayFields(orders);
+  const total = await prisma.order.count({ where });
+  return { orders: await addHolidayFields(orders), total };
 }
 
 export async function getOrderForUser(user: AuthUser, id: string, include?: Record<string, unknown>) {

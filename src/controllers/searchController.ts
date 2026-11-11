@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import prisma from "../lib/prisma";
 import { attachEffectiveStockToVariants } from "../lib/stock";
 import { presentArtisan } from "../lib/presentArtisan";
+import { parsePagination, buildPagination } from "../lib/pagination";
 
 // GET /api/search — Search produk dan kreator untuk mobile/customer (query: ?q=)
 export const search = async (req: Request, res: Response, next: NextFunction) => {
@@ -13,25 +14,28 @@ export const search = async (req: Request, res: Response, next: NextFunction) =>
       return res.status(400).json({ error: "q maksimal 100 karakter" });
     }
     const q = typeof req.query.q === "string" ? req.query.q.trim().toLowerCase() : "";
+    const pagination = parsePagination(req.query, { defaultLimit: 12, maxLimit: 50 });
 
     if (!q) {
       return res.json({ products: [], creators: [] });
     }
 
-    const [products, creators] = await Promise.all([
+    const productWhere: any = {
+      isActive: true,
+      approvalStatus: "disetujui",
+      withdrawnAt: null,
+      artisan: { status: "aktif" },
+      OR: [
+        { name: { contains: q } },
+        { shortDescription: { contains: q } },
+        { description: { contains: q } },
+        { category: { name: { contains: q } } },
+        { artisan: { brandName: { contains: q } } },
+      ],
+    };
+    const [products, creators, productTotal] = await Promise.all([
       prisma.product.findMany({
-        where: {
-          isActive: true,
-          approvalStatus: "disetujui",
-          artisan: { status: "aktif" }, // F-13: filter kreator aktif saja
-          OR: [
-            { name: { contains: q } },
-            { shortDescription: { contains: q } },
-            { description: { contains: q } },
-            { category: { name: { contains: q } } },
-            { artisan: { brandName: { contains: q } } },
-          ],
-        },
+        where: productWhere,
         include: {
           category: true,
           artisan: true,
@@ -40,7 +44,8 @@ export const search = async (req: Request, res: Response, next: NextFunction) =>
           story: true,
         },
         orderBy: { createdAt: "desc" },
-        take: 50,
+        skip: pagination ? (pagination.page - 1) * pagination.limit : undefined,
+        take: pagination ? pagination.limit : 50,
       }),
       prisma.artisan.findMany({
         where: {
@@ -58,6 +63,7 @@ export const search = async (req: Request, res: Response, next: NextFunction) =>
         orderBy: { createdAt: "desc" },
         take: 50,
       }),
+      pagination ? prisma.product.count({ where: productWhere }) : Promise.resolve(0),
     ]);
 
     // A3: Agregasi rating dan reviewCount untuk produk
@@ -126,7 +132,7 @@ export const search = async (req: Request, res: Response, next: NextFunction) =>
       };
     });
 
-    res.json({ products: productsWithStock, creators: creatorsWithStats });
+    res.json({ products: productsWithStock, creators: creatorsWithStats, ...(pagination ? { pagination: buildPagination(pagination.page, pagination.limit, productTotal) } : {}) });
   } catch (err) {
     next(err);
   }

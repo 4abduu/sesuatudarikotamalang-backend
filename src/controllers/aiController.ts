@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from "express";
+import { logger } from "../logger";
 
 const requestsByUser = new Map<string, number[]>();
 const RATE_WINDOW_MS = 60 * 60 * 1000;
@@ -269,7 +270,7 @@ export const storyDraft = async (req: Request, res: Response, next: NextFunction
 
       if (!response.ok) {
         const errBody = await response.text();
-        console.error("[AI] Gemini error", response.status, errBody);
+        logger.error({ status: response.status }, "gemini error");
         
         return res.status(response.status === 429 ? 429 : 503).json({
           error: response.status === 429
