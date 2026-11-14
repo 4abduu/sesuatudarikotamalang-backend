@@ -1,406 +1,3 @@
-// import { Prisma, PrismaClient } from "@prisma/client";
-// import bcrypt from "bcrypt";
-// import { ensureOfficialStore } from "../src/lib/officialStore";
-// import { normalizeBrandKey } from "../src/lib/brandKey";
-// import { calculateMonthlyReport } from "../src/lib/monthlyReport";
-
-// const prisma = new PrismaClient();
-// const WIB_OFFSET_MS = 7 * 60 * 60 * 1000;
-
-// type SeedUser = Awaited<ReturnType<typeof prisma.user.upsert>>;
-// type SeedArtisan = Awaited<ReturnType<typeof prisma.artisan.upsert>>;
-// type SeedProduct = Awaited<ReturnType<typeof prisma.product.upsert>>;
-// type SeedVariant = Awaited<ReturnType<typeof prisma.productVariant.create>>;
-
-// const imageUrls = {
-//   paper: "https://images.unsplash.com/photo-1544947950-fa07a98d237f?auto=format&fit=crop&w=900&q=85",
-//   postcard: "https://images.unsplash.com/photo-1516979187457-637abb4f9353?auto=format&fit=crop&w=900&q=85",
-//   textile: "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?auto=format&fit=crop&w=900&q=85",
-//   bag: "https://images.unsplash.com/photo-1553062407-98eeb64c6a62?auto=format&fit=crop&w=900&q=85",
-//   ceramic: "https://images.unsplash.com/photo-1572119865084-43c1a0861b7b?auto=format&fit=crop&w=900&q=85",
-//   craft: "https://images.unsplash.com/photo-1452860606245-08befc0ff44b?auto=format&fit=crop&w=900&q=85",
-//   workspace: "https://images.unsplash.com/photo-1455390582262-044c61d1cfe2?auto=format&fit=crop&w=900&q=85",
-//   art: "https://images.unsplash.com/photo-1547891654-e66ed7ebb968?auto=format&fit=crop&w=900&q=85",
-//   portrait: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=400&q=85",
-//   portraitTwo: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=400&q=85",
-//   portraitThree: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=85",
-// };
-
-// function nowWibDate(): string {
-//   return new Date(Date.now() + WIB_OFFSET_MS).toISOString().slice(0, 10);
-// }
-
-// function addDays(dateString: string, days: number): string {
-//   const date = new Date(`${dateString}T00:00:00.000Z`);
-//   date.setUTCDate(date.getUTCDate() + days);
-//   return date.toISOString().slice(0, 10);
-// }
-
-// function addMonths(dateString: string, months: number): string {
-//   const date = new Date(`${dateString}T00:00:00.000Z`);
-//   date.setUTCMonth(date.getUTCMonth() + months);
-//   return date.toISOString().slice(0, 10);
-// }
-
-// function dateOnly(dateString: string): Date {
-//   return new Date(`${dateString}T00:00:00.000Z`);
-// }
-
-// function wibTimestamp(dateString: string, time = "12:00:00"): Date {
-//   return new Date(`${dateString}T${time}+07:00`);
-// }
-
-// function previousMonth(dateString: string): string {
-//   return addMonths(`${dateString.slice(0, 7)}-01`, -1).slice(0, 7);
-// }
-
-// function monthsAgo(dateString: string, months: number): string {
-//   return addMonths(`${dateString.slice(0, 7)}-01`, -months).slice(0, 7);
-// }
-
-// function jsonArrayEqual(value: unknown, expected: string[]): boolean {
-//   return Array.isArray(value) && JSON.stringify(value) === JSON.stringify(expected);
-// }
-
-// async function upsertUser(input: {
-//   email: string;
-//   name: string;
-//   role: "buyer" | "creator" | "admin";
-//   passwordHash: string;
-//   avatarUrl?: string | null;
-// }): Promise<SeedUser> {
-//   return prisma.user.upsert({
-//     where: { email: input.email },
-//     update: { name: input.name, role: input.role, passwordHash: input.passwordHash, authProvider: "email", avatarUrl: input.avatarUrl ?? null },
-//     create: { email: input.email, name: input.name, role: input.role, passwordHash: input.passwordHash, authProvider: "email", avatarUrl: input.avatarUrl ?? null },
-//   });
-// }
-
-// async function upsertArtisan(input: {
-//   userId?: string | null;
-//   brandName: string;
-//   bio: string;
-//   avatarUrl?: string | null;
-//   creatorSharePercent?: number | null;
-// }): Promise<SeedArtisan> {
-//   const existing = input.userId
-//     ? await prisma.artisan.findUnique({ where: { userId: input.userId } })
-//     : await prisma.artisan.findFirst({ where: { brandKey: normalizeBrandKey(input.brandName) } });
-//   const data = {
-//     brandName: input.brandName,
-//     brandKey: normalizeBrandKey(input.brandName),
-//     bio: input.bio,
-//     avatarUrl: input.avatarUrl ?? null,
-//     status: "aktif" as const,
-//     isOfficial: false,
-//     creatorSharePercent: input.creatorSharePercent ?? null,
-//   };
-//   if (existing) return prisma.artisan.update({ where: { id: existing.id }, data });
-//   return prisma.artisan.create({ data: { ...data, userId: input.userId ?? null } });
-// }
-
-// async function upsertVariant(productId: string, combination: string[], stock: number, key: string): Promise<SeedVariant> {
-//   const variants = await prisma.productVariant.findMany({ where: { productId } });
-//   const existing = variants.find((variant) => jsonArrayEqual(variant.combination, combination));
-//   if (existing) return prisma.productVariant.update({ where: { id: existing.id }, data: { stock, combination } });
-//   return prisma.productVariant.create({ data: { id: `seed-variant-${key}`, productId, combination, stock } });
-// }
-
-// async function upsertProduct(input: {
-//   key: string;
-//   artisanId: string;
-//   categoryId: string;
-//   name: string;
-//   price: number;
-//   description: string;
-//   shortDescription: string;
-//   images: string[];
-//   isLimited?: boolean;
-//   isActive?: boolean;
-//   approvalStatus?: "menunggu" | "disetujui" | "ditolak";
-//   statusNote?: string | null;
-//   withdrawnAt?: Date | null;
-//   createdAt?: Date;
-//   soldCount?: number;
-//   viewCount?: number;
-//   imageVariants?: Array<{ url: string; option: string; value: string }>;
-//   options?: Array<{ name: string; values: string[] }>;
-//   variants: Array<{ combination: string[]; stock: number }>;
-//   story?: { title: string; content: string; process?: string | null; coverImageUrl?: string | null; processImages: string[] };
-// }): Promise<{ product: SeedProduct; variants: SeedVariant[] }> {
-//   const createdAt = input.createdAt ?? wibTimestamp(addDays(nowWibDate(), -30), "10:00:00");
-//   const product = await prisma.product.upsert({
-//     where: { slug: input.key },
-//     update: { artisanId: input.artisanId, categoryId: input.categoryId, name: input.name, shortDescription: input.shortDescription, description: input.description, price: input.price, images: input.images, imageVariants: input.imageVariants ?? Prisma.JsonNull, isLimited: input.isLimited ?? false, isActive: input.isActive ?? true, approvalStatus: input.approvalStatus ?? "disetujui", statusNote: input.statusNote ?? null, withdrawnAt: input.withdrawnAt ?? null, soldCount: input.soldCount ?? 0, viewCount: input.viewCount ?? 0, createdAt },
-//     create: { slug: input.key, artisanId: input.artisanId, categoryId: input.categoryId, name: input.name, shortDescription: input.shortDescription, description: input.description, price: input.price, images: input.images, imageVariants: input.imageVariants ?? Prisma.JsonNull, isLimited: input.isLimited ?? false, isActive: input.isActive ?? true, approvalStatus: input.approvalStatus ?? "disetujui", statusNote: input.statusNote ?? null, withdrawnAt: input.withdrawnAt ?? null, soldCount: input.soldCount ?? 0, viewCount: input.viewCount ?? 0, createdAt },
-//   });
-//   for (const [index, option] of (input.options ?? []).entries()) {
-//     const existing = await prisma.productVariantOption.findFirst({ where: { productId: product.id, name: option.name } });
-//     if (existing) await prisma.productVariantOption.update({ where: { id: existing.id }, data: { values: option.values, sortOrder: index } });
-//     else await prisma.productVariantOption.create({ data: { id: `seed-option-${input.key}-${index}`, productId: product.id, name: option.name, values: option.values, sortOrder: index } });
-//   }
-//   const variants: SeedVariant[] = [];
-//   for (const variant of input.variants) variants.push(await upsertVariant(product.id, variant.combination, variant.stock, `${input.key}-${variant.combination.join("-") || "single"}`));
-//   if (input.story) await prisma.productStory.upsert({ where: { productId: product.id }, update: input.story, create: { productId: product.id, ...input.story } });
-//   return { product, variants };
-// }
-
-// async function upsertOrder(input: {
-//   key: string;
-//   userId: string;
-//   productId: string;
-//   variantId: string;
-//   quantity: number;
-//   price: number;
-//   paymentMethod: "midtrans" | "cod";
-//   status: "menunggu_bayar" | "lunas" | "selesai" | "dibatalkan" | "kedaluwarsa" | "lewat_batas_pengambilan";
-//   pickupDate: string;
-//   pickupSlot: string;
-//   createdAt: Date;
-//   holdExpiresAt?: Date | null;
-//   pickupDeadline?: Date | null;
-//   refundStatus?: "tidak_ada" | "menunggu" | "selesai";
-//   refundedAt?: Date | null;
-//   cancelReason?: "permintaan_pembeli" | "kesalahan_toko" | null;
-//   completedAt?: Date | null;
-//   payment?: { status: string; paidAt?: Date | null; transactionId?: string | null };
-// }): Promise<{ order: Awaited<ReturnType<typeof prisma.order.upsert>>; itemId: string }> {
-//   const order = await prisma.order.upsert({
-//     where: { orderNumber: input.key },
-//     update: { userId: input.userId, paymentMethod: input.paymentMethod, status: input.status, totalAmount: input.price * input.quantity, pickupDate: dateOnly(input.pickupDate), pickupSlot: input.pickupSlot, holdExpiresAt: input.holdExpiresAt ?? null, pickupDeadline: input.pickupDeadline ?? null, refundStatus: input.refundStatus ?? "tidak_ada", refundedAt: input.refundedAt ?? null, cancelReason: input.cancelReason ?? null, completedAt: input.completedAt ?? null, createdAt: input.createdAt },
-//     create: { id: `seed-order-${input.key.toLowerCase()}`, orderNumber: input.key, userId: input.userId, paymentMethod: input.paymentMethod, status: input.status, totalAmount: input.price * input.quantity, pickupDate: dateOnly(input.pickupDate), pickupSlot: input.pickupSlot, holdExpiresAt: input.holdExpiresAt ?? null, pickupDeadline: input.pickupDeadline ?? null, refundStatus: input.refundStatus ?? "tidak_ada", refundedAt: input.refundedAt ?? null, cancelReason: input.cancelReason ?? null, completedAt: input.completedAt ?? null, createdAt: input.createdAt },
-//   });
-//   const itemId = `seed-item-${input.key.toLowerCase()}`;
-//   await prisma.orderItem.upsert({ where: { id: itemId }, update: { orderId: order.id, productId: input.productId, variantId: input.variantId, quantity: input.quantity, priceSnapshot: input.price }, create: { id: itemId, orderId: order.id, productId: input.productId, variantId: input.variantId, quantity: input.quantity, priceSnapshot: input.price } });
-//   if (input.payment) await prisma.payment.upsert({ where: { orderId: order.id }, update: { status: input.payment.status, paidAt: input.payment.paidAt ?? null, midtransTransactionId: input.payment.transactionId ?? null }, create: { orderId: order.id, status: input.payment.status, paidAt: input.payment.paidAt ?? null, midtransTransactionId: input.payment.transactionId ?? null } });
-//   return { order, itemId };
-// }
-
-// async function upsertNotification(input: {
-//   id: string;
-//   userId: string;
-//   type: "pengajuan_diterima" | "pengajuan_ditolak" | "ulasan_baru" | "pesanan_update" | "umum" | "stok_menipis" | "produk_mendekati_batas" | "produk_ditarik" | "produk_disetujui" | "produk_ditolak" | "produk_disembunyikan" | "libur_terdampak" | "laporan_final";
-//   title: string;
-//   body: string;
-//   isRead?: boolean;
-//   createdAt: Date;
-// }) {
-//   return prisma.notification.upsert({ where: { id: input.id }, update: { userId: input.userId, type: input.type, title: input.title, body: input.body, isRead: input.isRead ?? false, createdAt: input.createdAt }, create: { ...input, isRead: input.isRead ?? false } });
-// }
-
-// async function main() {
-//   if (process.env.NODE_ENV === "production") {
-//     console.error("Seed ditolak: jangan jalankan seeder di lingkungan production.");
-//     process.exit(1);
-//   }
-//   const adminEmail = process.env.SEED_ADMIN_EMAIL;
-//   const adminRawPassword = process.env.SEED_ADMIN_PASSWORD;
-//   if (!adminEmail || !adminRawPassword) {
-//     console.error("Seed ditolak: SEED_ADMIN_EMAIL dan SEED_ADMIN_PASSWORD wajib didefinisikan di environment.");
-//     process.exit(1);
-//   }
-//   const demoRawPassword = process.env.SEED_DEMO_PASSWORD || adminRawPassword;
-//   const adminPassword = await bcrypt.hash(adminRawPassword, 10);
-//   const demoPassword = await bcrypt.hash(demoRawPassword, 10);
-//   const today = nowWibDate();
-//   const reportMonth = previousMonth(today);
-//   const reportDate = `${reportMonth}-15`;
-//   const holidayDate = addDays(today, 10);
-//   console.log("Menyiapkan data demo SDKM...");
-
-//   const categoryData = [
-//     ["postcard", "Postcard", "Kartu pos ilustrasi tangan", "mail"],
-//     ["pin-enamel", "Pin Enamel", "Pin kecil bertema lokal", "circle-dot"],
-//     ["apparel", "Apparel", "Kaos dan pakaian sablon", "shirt"],
-//     ["stiker", "Stiker", "Stiker vinyl ornamen", "sticker"],
-//     ["kriya-kayu", "Kriya Kayu", "Gantungan dan hiasan kayu", "tree-pine"],
-//     ["tote-bag", "Tote Bag", "Tas kanvas hasil sablon", "shopping-bag"],
-//     ["keramik", "Keramik", "Mug dan cangkir tanah liat", "coffee"],
-//     ["zine", "Zine", "Buku kecil cerita kota", "book-open"],
-//   ] as const;
-//   const categories: Record<string, { id: string; name: string }> = {};
-//   for (const [index, [slug, name, blurb, iconName]] of categoryData.entries()) {
-//     const category = await prisma.category.upsert({ where: { slug }, update: { name, blurb, iconName, sortOrder: index + 1 }, create: { id: slug, slug, name, blurb, iconName, sortOrder: index + 1 } });
-//     categories[slug] = category;
-//   }
-
-//   const admin = await upsertUser({ email: adminEmail, name: "Admin Sesuatu DariKota", role: "admin", passwordHash: adminPassword, avatarUrl: imageUrls.portraitTwo });
-//   const demoAdmin = await upsertUser({ email: process.env.SEED_DEMO_ADMIN_EMAIL || "demo.admin@sesuatu.test", name: "Admin Demo SDKM", role: "admin", passwordHash: demoPassword, avatarUrl: imageUrls.portraitTwo });
-//   const buyer = await upsertUser({ email: process.env.SEED_BUYER_EMAIL || "buyer@test.com", name: "Budi Santoso", role: "buyer", passwordHash: demoPassword, avatarUrl: imageUrls.portrait });
-//   const buyerTwo = await upsertUser({ email: "sari.demo@sesuatudarikota.test", name: "Sari Wulandari", role: "buyer", passwordHash: demoPassword, avatarUrl: null });
-//   const buyerThree = await upsertUser({ email: "rizal.demo@sesuatudarikota.test", name: "Rizal Mahendra", role: "buyer", passwordHash: demoPassword, avatarUrl: imageUrls.portraitThree });
-//   const applicant = await upsertUser({ email: "calon.kreator@sesuatudarikota.test", name: "Nadia Permata", role: "buyer", passwordHash: demoPassword, avatarUrl: null });
-//   const creatorDiniUser = await upsertUser({ email: "dini@sesuatudarikota.com", name: "Dini Aulia", role: "creator", passwordHash: demoPassword, avatarUrl: imageUrls.portrait });
-//   const creatorBagasUser = await upsertUser({ email: "bagas@sesuatudarikota.com", name: "Bagas Pratama", role: "creator", passwordHash: demoPassword, avatarUrl: imageUrls.portraitTwo });
-//   const creatorRaraUser = await upsertUser({ email: "rara@sesuatudarikota.com", name: "Rara Kamila", role: "creator", passwordHash: demoPassword, avatarUrl: null });
-//   const creatorDemoUser = await upsertUser({ email: process.env.SEED_DEMO_CREATOR_EMAIL || "demo.creator@sesuatu.test", name: "Alya Prameswari", role: "creator", passwordHash: demoPassword, avatarUrl: imageUrls.portraitThree });
-
-//   const artisanDini = await upsertArtisan({ userId: creatorDiniUser.id, brandName: "Dini Draws", bio: "Ilustrator yang menggambar sudut Kayutangan, genteng tua, dan jendela heritage Malang.", avatarUrl: null, creatorSharePercent: null });
-//   const artisanBagas = await upsertArtisan({ userId: creatorBagasUser.id, brandName: "Bagas Pin Co", bio: "Perajin pin, kayu, dan keramik kecil yang terinspirasi dari cerita kota Malang.", avatarUrl: imageUrls.portraitTwo, creatorSharePercent: 75 });
-//   const artisanRara = await upsertArtisan({ userId: creatorRaraUser.id, brandName: "Rara Sablon", bio: "Sablon manual satu per satu dengan motif ornamen rumah tua dan kampung heritage.", avatarUrl: null, creatorSharePercent: null });
-//   const artisanDemo = await upsertArtisan({ userId: creatorDemoUser.id, brandName: "Alya Handmade", bio: "Toko demo kreator dengan koleksi kecil kerajinan dan cerita di balik prosesnya.", avatarUrl: imageUrls.portraitThree, creatorSharePercent: 65 });
-//   const official = (await ensureOfficialStore(prisma)).artisan;
-
-//   await prisma.appSettings.upsert({ where: { id: 1 }, update: { holdDurationMinutes: 1440, autoCancelEnabled: true, pickupDeadlineDays: 14, refundWindowDays: 3, pickupOpenTime: "09:00", pickupCloseTime: "19:00", pickupLeadMinutes: 30, whatsappAdminNumber: "+6281234567890", notificationEmail: "admin@sesuatudarikota.com", lowStockThreshold: 5, defaultCreatorSharePercent: 70, weeklyOffEnabled: true, weeklyOffDays: [7] }, create: { id: 1, holdDurationMinutes: 1440, autoCancelEnabled: true, pickupDeadlineDays: 14, refundWindowDays: 3, pickupOpenTime: "09:00", pickupCloseTime: "19:00", pickupLeadMinutes: 30, whatsappAdminNumber: "+6281234567890", notificationEmail: "admin@sesuatudarikota.com", lowStockThreshold: 5, defaultCreatorSharePercent: 70, weeklyOffEnabled: true, weeklyOffDays: [7] } });
-//   for (const [index, time] of ["09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00"].entries()) await prisma.pickupSlot.upsert({ where: { time }, update: { capacity: index < 3 ? 4 : 3, isActive: true }, create: { time, capacity: index < 3 ? 4 : 3, isActive: true } });
-//   await prisma.pickupHoliday.upsert({ where: { id: "seed-holiday-demo" }, update: { startDate: dateOnly(holidayDate), endDate: dateOnly(holidayDate), reason: "Persiapan bazar komunitas Kayutangan", createdById: admin.id }, create: { id: "seed-holiday-demo", startDate: dateOnly(holidayDate), endDate: dateOnly(holidayDate), reason: "Persiapan bazar komunitas Kayutangan", createdById: admin.id } });
-//   for (const [id, daysAgo, reason] of [["seed-holiday-history-1", 48, "Penataan ulang ruang galeri"], ["seed-holiday-history-2", 21, "Libur persiapan acara komunitas"]] as const) await prisma.pickupHoliday.upsert({ where: { id }, update: { startDate: dateOnly(addDays(today, -daysAgo)), endDate: dateOnly(addDays(today, -daysAgo)), reason, createdById: admin.id }, create: { id, startDate: dateOnly(addDays(today, -daysAgo)), endDate: dateOnly(addDays(today, -daysAgo)), reason, createdById: admin.id } });
-
-//   const products: Record<string, { product: SeedProduct; variants: SeedVariant[] }> = {};
-//   const add = async (key: string, spec: Omit<Parameters<typeof upsertProduct>[0], "key" | "artisanId" | "categoryId"> & { artisanId: string; categoryId: string }) => { products[key] = await upsertProduct({ key, ...spec }); };
-//   await add("kartu-pos-sudut-kayutangan", { artisanId: artisanDini.id, categoryId: categories.postcard.id, name: "Kartu Pos Sudut Kayutangan", price: 15000, description: "Kartu pos cetak tebal dengan ilustrasi cat air sudut bangunan kolonial Kayutangan Malang.", shortDescription: "Ilustrasi bangunan kolonial Kayutangan.", images: [imageUrls.postcard, imageUrls.paper], variants: [{ combination: [], stock: 25 }], createdAt: wibTimestamp(addDays(today, -140), "10:00:00"), soldCount: 18, viewCount: 138, isLimited: true, story: { title: "Kenangan di Tikungan Kayutangan", content: "Sudut ini selalu ramai saat sore hari. Bangunan lama dan kedai kecilnya menyimpan banyak cerita warga Malang.", process: "Disketsa langsung di lokasi menggunakan pensil 2B, lalu diwarnai dengan cat air di atas kertas cold-pressed.", coverImageUrl: imageUrls.postcard, processImages: [imageUrls.workspace, imageUrls.art] } });
-//   await add("pin-enamel-trem-antik-malang", { artisanId: artisanBagas.id, categoryId: categories["pin-enamel"].id, name: "Pin Enamel Trem Antik Malang", price: 35000, description: "Pin logam berenamel keras dengan detail trem uap bersejarah yang dulu melintasi pusat kota Malang.", shortDescription: "Pin enamel trem uap bersejarah Malang.", images: [imageUrls.craft], variants: [{ combination: [], stock: 15 }], createdAt: wibTimestamp(addDays(today, -120), "10:00:00"), soldCount: 24, viewCount: 226 });
-//   await add("kaos-kerawang-malang-tempo-dulu", { artisanId: artisanRara.id, categoryId: categories.apparel.id, name: "Kaos Kerawang Malang Tempo Dulu", price: 135000, description: "Kaos katun combed dengan sablon manual motif ventilasi kerawang rumah kuno Klojen.", shortDescription: "Kaos sablon manual motif rumah kuno.", images: [imageUrls.textile, imageUrls.bag], options: [{ name: "Ukuran", values: ["S", "M", "L", "XL"] }], variants: [{ combination: ["S"], stock: 4 }, { combination: ["M"], stock: 8 }, { combination: ["L"], stock: 6 }, { combination: ["XL"], stock: 3 }], createdAt: wibTimestamp(addDays(today, -100), "10:00:00"), soldCount: 16, viewCount: 174, imageVariants: [{ url: imageUrls.textile, option: "Ukuran", value: "M" }, { url: imageUrls.bag, option: "Ukuran", value: "L" }], story: { title: "Menyelamatkan Ornamen yang Terlupakan", content: "Motif ventilasi rumah lama Klojen dipindahkan ke kain agar tetap mudah dikenali generasi baru.", process: "Klise sablon dibuat manual dan dicetak satu per satu menggunakan tinta yang tahan cuci.", coverImageUrl: null, processImages: [imageUrls.textile] } });
-//   await add("stiker-vinyl-ornamen-arema", { artisanId: artisanDini.id, categoryId: categories.stiker.id, name: "Stiker Vinyl Ornamen Arema Klasik", price: 8000, description: "Stiker vinyl tahan air dengan grafis tipografi khas Arema klasik untuk laptop, botol, dan jurnal.", shortDescription: "Stiker tahan air grafis klasik Malang.", images: [imageUrls.art], variants: [{ combination: [], stock: 50 }], createdAt: wibTimestamp(addDays(today, -105), "10:00:00"), soldCount: 31, viewCount: 310 });
-//   await add("tatakan-gelas-kayu-jati", { artisanId: artisanBagas.id, categoryId: categories["kriya-kayu"].id, name: "Tatakan Gelas Kayu Jati Kayutangan", price: 25000, description: "Coaster kayu jati sisa perajin mebel lokal dengan ukiran inisial sudut Kayutangan.", shortDescription: "Coaster kayu jati daur ulang halus.", images: [], variants: [{ combination: [], stock: 2 }], soldCount: 8, viewCount: 95 });
-//   await add("tote-bag-kanvas-singosari", { artisanId: artisanRara.id, categoryId: categories["tote-bag"].id, name: "Tote Bag Kanvas Sablon Candi Singosari", price: 65000, description: "Tote bag kanvas tebal dengan ritsleting dan sablon siluet arca Dwarapala Singosari.", shortDescription: "Tote bag kanvas tebal sablon Dwarapala.", images: [imageUrls.bag, imageUrls.textile], variants: [{ combination: [], stock: 12 }], createdAt: wibTimestamp(addDays(today, -110), "10:00:00"), soldCount: 12, viewCount: 154 });
-//   await add("cangkir-keramik-dinoyo", { artisanId: artisanBagas.id, categoryId: categories.keramik.id, name: "Cangkir Keramik Gerabah Dinoyo", price: 45000, description: "Cangkir tanah liat bakar khas kampung keramik Dinoyo dengan glasir hijau botol antik.", shortDescription: "Cangkir glasir hijau khas Dinoyo.", images: [imageUrls.ceramic], variants: [{ combination: [], stock: 10 }], soldCount: 10, viewCount: 112 });
-//   await add("zine-cerita-kajoetangan", { artisanId: artisanDini.id, categoryId: categories.zine.id, name: "Zine Cerita Kampung Kajoetangan", price: 28000, description: "Buku saku mini berisi esai foto dan sketsa warga tertua di koridor Kayutangan.", shortDescription: "Buku saku ilustrasi dan esai foto warga.", images: [imageUrls.paper, imageUrls.workspace], variants: [{ combination: [], stock: 20 }], createdAt: wibTimestamp(addDays(today, -130), "10:00:00"), soldCount: 14, viewCount: 182, story: { title: "Cerita dari Teras Rumah Lama", content: "Zine ini mengumpulkan cerita singkat dari orang-orang yang tumbuh di sekitar koridor Kayutangan.", process: "Wawancara singkat, foto analog, dan sketsa tinta disusun menjadi buku saku.", coverImageUrl: imageUrls.paper, processImages: [imageUrls.workspace] } });
-//   await add("gantungan-kunci-kayu-ojek", { artisanId: artisanBagas.id, categoryId: categories["kriya-kayu"].id, name: "Gantungan Kunci Kayu Ikon Malang", price: 18000, description: "Gantungan kunci kayu ringan dengan bentuk ikon kota dan finishing minyak alami.", shortDescription: "Souvenir kayu kecil untuk oleh-oleh.", images: [imageUrls.craft], variants: [{ combination: [], stock: 6 }], soldCount: 7, viewCount: 78 });
-//   await add("notebook-sampul-kain", { artisanId: artisanDemo.id, categoryId: categories.zine.id, name: "Notebook Sampul Kain Heritage", price: 32000, description: "Notebook kertas daur ulang dengan sampul kain bermotif ubin rumah lama.", shortDescription: "Notebook daur ulang sampul kain.", images: [], variants: [{ combination: [], stock: 7 }], createdAt: wibTimestamp(addDays(today, -100), "10:00:00"), soldCount: 8, viewCount: 48 });
-//   await add("mug-lukis-tangan-pasar-besar", { artisanId: official.id, categoryId: categories.keramik.id, name: "Mug Lukis Tangan Pasar Besar", price: 55000, description: "Mug lini toko dengan ilustrasi suasana Pasar Besar Malang dan pegangan nyaman.", shortDescription: "Mug oleh-oleh lini toko.", images: [imageUrls.ceramic, imageUrls.craft], variants: [{ combination: [], stock: 18 }], soldCount: 21, viewCount: 250, isLimited: true });
-//   await add("produk-menunggu-persetujuan-demo", { artisanId: artisanDemo.id, categoryId: categories.postcard.id, name: "Poster Matahari Kayutangan", price: 42000, description: "Poster ilustrasi matahari sore di koridor Kayutangan yang sedang menunggu persetujuan admin.", shortDescription: "Poster ilustrasi baru dari kreator.", images: [imageUrls.postcard], variants: [{ combination: [], stock: 9 }], approvalStatus: "menunggu", isActive: false, soldCount: 0, viewCount: 4 });
-//   await add("produk-ditolak-perlu-revisi-demo", { artisanId: artisanDemo.id, categoryId: categories.stiker.id, name: "Stiker Sketsa Alun-Alun", price: 9000, description: "Set stiker sketsa alun-alun kota untuk contoh produk yang perlu revisi.", shortDescription: "Produk demo berstatus ditolak.", images: [], variants: [{ combination: [], stock: 20 }], approvalStatus: "ditolak", statusNote: "Foto produk dan deskripsi perlu diperjelas sebelum disetujui.", isActive: false, soldCount: 0, viewCount: 7 });
-//   await add("produk-disembunyikan-admin-demo", { artisanId: artisanRara.id, categoryId: categories["tote-bag"].id, name: "Pouch Kanvas Motif Ubin", price: 48000, description: "Pouch kanvas contoh untuk memperlihatkan status disembunyikan admin.", shortDescription: "Produk yang disembunyikan sementara.", images: [imageUrls.bag], variants: [{ combination: [], stock: 5 }], approvalStatus: "disetujui", statusNote: "Sementara disembunyikan untuk penataan katalog.", isActive: false, soldCount: 5, viewCount: 34 });
-//   await add("produk-ditarik-lama-demo", { artisanId: artisanDini.id, categoryId: categories.postcard.id, name: "Kartu Pos Gang Lama", price: 12000, description: "Produk lama yang sudah ditarik admin karena tidak laku selama enam bulan.", shortDescription: "Produk demo berstatus ditarik.", images: [], variants: [{ combination: [], stock: 0 }], approvalStatus: "disetujui", statusNote: "Tidak laku selama 6 bulan", isActive: false, withdrawnAt: wibTimestamp(addDays(today, -200), "09:00:00"), createdAt: wibTimestamp(addDays(today, -230), "10:00:00"), soldCount: 1, viewCount: 20 });
-//   await add("produk-ditarik-demo-alya", { artisanId: artisanDemo.id, categoryId: categories.postcard.id, name: "Sketsa Gang Ijen Lama", price: 26000, description: "Produk lama milik Alya Handmade yang ditarik sebagai contoh alur penggantian produk.", shortDescription: "Produk lama yang sudah ditarik admin.", images: [], variants: [{ combination: [], stock: 0 }], approvalStatus: "disetujui", statusNote: "Tidak laku selama 6 bulan", isActive: false, withdrawnAt: wibTimestamp(addDays(today, -205), "09:00:00"), createdAt: wibTimestamp(addDays(today, -235), "10:00:00"), soldCount: 0, viewCount: 12 });
-//   await add("produk-lambat-peringatan-demo", { artisanId: artisanDemo.id, categoryId: categories["kriya-kayu"].id, name: "Rak Mini Kayu Kampung", price: 85000, description: "Rak mini dari kayu sisa produksi yang belum banyak terjual.", shortDescription: "Produk slow mover untuk peringatan.", images: [imageUrls.craft], variants: [{ combination: [], stock: 3 }], createdAt: wibTimestamp(addDays(today, -155), "10:00:00"), soldCount: 0, viewCount: 29 });
-//   await add("produk-lambat-tarik-demo", { artisanId: artisanDemo.id, categoryId: categories["kriya-kayu"].id, name: "Baki Kayu Motif Sawah", price: 72000, description: "Baki kayu koleksi lama yang masuk daftar tarik manual.", shortDescription: "Produk slow mover level tarik.", images: [], variants: [{ combination: [], stock: 1 }], createdAt: wibTimestamp(addDays(today, -190), "10:00:00"), soldCount: 0, viewCount: 16 });
-//   await prisma.product.update({ where: { slug: "produk-menunggu-persetujuan-demo" }, data: { replacesProductId: products["produk-ditarik-demo-alya"].product.id } });
-
-//   for (const [key, entry] of Object.entries(products)) for (const [index, variant] of entry.variants.entries()) await prisma.stockMovement.upsert({ where: { id: `seed-stock-in-${key}-${index}` }, update: { productId: entry.product.id, variantId: variant.id, delta: variant.stock, stockAfter: variant.stock, reason: "barang_masuk", note: "Stok awal demo", actorId: admin.id, createdAt: entry.product.createdAt }, create: { id: `seed-stock-in-${key}-${index}`, productId: entry.product.id, variantId: variant.id, delta: variant.stock, stockAfter: variant.stock, reason: "barang_masuk", note: "Stok awal demo", actorId: admin.id, createdAt: entry.product.createdAt } });
-
-//   const createOrder = async (input: Parameters<typeof upsertOrder>[0]) => upsertOrder(input);
-//   await createOrder({ key: "SDK-DEMO-0001", userId: buyer.id, productId: products["kartu-pos-sudut-kayutangan"].product.id, variantId: products["kartu-pos-sudut-kayutangan"].variants[0].id, quantity: 1, price: 15000, paymentMethod: "midtrans", status: "lunas", pickupDate: today, pickupSlot: "10:00", createdAt: wibTimestamp(today, "08:20:00"), pickupDeadline: wibTimestamp(addDays(today, 14), "23:59:00"), payment: { status: "settlement", paidAt: wibTimestamp(today, "08:25:00"), transactionId: "demo-midtrans-0001" } });
-//   await createOrder({ key: "SDK-DEMO-0002", userId: buyer.id, productId: products["tote-bag-kanvas-singosari"].product.id, variantId: products["tote-bag-kanvas-singosari"].variants[0].id, quantity: 1, price: 65000, paymentMethod: "midtrans", status: "lunas", pickupDate: holidayDate, pickupSlot: "11:00", createdAt: wibTimestamp(today, "09:10:00"), pickupDeadline: wibTimestamp(addDays(holidayDate, 14), "23:59:00"), payment: { status: "settlement", paidAt: wibTimestamp(today, "09:15:00"), transactionId: "demo-midtrans-0002" } });
-//   await createOrder({ key: "SDK-DEMO-0003", userId: buyerTwo.id, productId: products["pin-enamel-trem-antik-malang"].product.id, variantId: products["pin-enamel-trem-antik-malang"].variants[0].id, quantity: 2, price: 35000, paymentMethod: "cod", status: "menunggu_bayar", pickupDate: addDays(today, 2), pickupSlot: "14:00", createdAt: wibTimestamp(today, "07:40:00"), holdExpiresAt: wibTimestamp(addDays(today, 1), "23:59:00") });
-//   await createOrder({ key: "SDK-DEMO-0004", userId: buyerThree.id, productId: products["cangkir-keramik-dinoyo"].product.id, variantId: products["cangkir-keramik-dinoyo"].variants[0].id, quantity: 1, price: 45000, paymentMethod: "midtrans", status: "lunas", pickupDate: addDays(today, 3), pickupSlot: "15:00", createdAt: wibTimestamp(addDays(today, -1), "13:10:00"), pickupDeadline: wibTimestamp(addDays(today, 17), "23:59:00"), payment: { status: "settlement", paidAt: wibTimestamp(addDays(today, -1), "13:15:00"), transactionId: "demo-midtrans-0004" } });
-//   await createOrder({ key: "SDK-DEMO-0005", userId: buyer.id, productId: products["zine-cerita-kajoetangan"].product.id, variantId: products["zine-cerita-kajoetangan"].variants[0].id, quantity: 2, price: 28000, paymentMethod: "midtrans", status: "selesai", pickupDate: addDays(reportDate, 2), pickupSlot: "10:00", createdAt: wibTimestamp(reportDate, "10:00:00"), pickupDeadline: wibTimestamp(addDays(reportDate, 16), "23:59:00"), completedAt: wibTimestamp(addDays(reportDate, 2), "11:30:00"), payment: { status: "settlement", paidAt: wibTimestamp(reportDate, "10:05:00"), transactionId: "demo-midtrans-0005" } });
-//   const completedForReview = await createOrder({ key: "SDK-DEMO-0006", userId: buyerTwo.id, productId: products["pin-enamel-trem-antik-malang"].product.id, variantId: products["pin-enamel-trem-antik-malang"].variants[0].id, quantity: 1, price: 35000, paymentMethod: "cod", status: "selesai", pickupDate: addDays(reportDate, 8), pickupSlot: "13:00", createdAt: wibTimestamp(addDays(reportDate, 7), "09:00:00"), completedAt: wibTimestamp(addDays(reportDate, 8), "13:20:00") });
-//   await createOrder({ key: "SDK-DEMO-0011", userId: buyerTwo.id, productId: products["tote-bag-kanvas-singosari"].product.id, variantId: products["tote-bag-kanvas-singosari"].variants[0].id, quantity: 1, price: 65000, paymentMethod: "cod", status: "selesai", pickupDate: addDays(reportDate, 10), pickupSlot: "14:00", createdAt: wibTimestamp(addDays(reportDate, 9), "09:00:00"), completedAt: wibTimestamp(addDays(reportDate, 10), "14:20:00") });
-//   await createOrder({ key: "SDK-DEMO-0012", userId: buyerThree.id, productId: products["notebook-sampul-kain"].product.id, variantId: products["notebook-sampul-kain"].variants[0].id, quantity: 2, price: 32000, paymentMethod: "midtrans", status: "selesai", pickupDate: addDays(reportDate, 12), pickupSlot: "15:00", createdAt: wibTimestamp(addDays(reportDate, 11), "09:00:00"), pickupDeadline: wibTimestamp(addDays(reportDate, 25), "23:59:00"), completedAt: wibTimestamp(addDays(reportDate, 12), "15:20:00"), payment: { status: "settlement", paidAt: wibTimestamp(addDays(reportDate, 11), "09:05:00"), transactionId: "demo-midtrans-0012" } });
-//   await createOrder({ key: "SDK-DEMO-0007", userId: buyerThree.id, productId: products["tatakan-gelas-kayu-jati"].product.id, variantId: products["tatakan-gelas-kayu-jati"].variants[0].id, quantity: 1, price: 25000, paymentMethod: "midtrans", status: "dibatalkan", pickupDate: addDays(today, -3), pickupSlot: "09:00", createdAt: wibTimestamp(addDays(today, -10), "10:00:00"), pickupDeadline: wibTimestamp(addDays(today, 11), "23:59:00"), refundStatus: "menunggu", cancelReason: "kesalahan_toko", payment: { status: "settlement", paidAt: wibTimestamp(addDays(today, -10), "10:05:00"), transactionId: "demo-midtrans-0007" } });
-//   await createOrder({ key: "SDK-DEMO-0008", userId: buyer.id, productId: products["gantungan-kunci-kayu-ojek"].product.id, variantId: products["gantungan-kunci-kayu-ojek"].variants[0].id, quantity: 1, price: 18000, paymentMethod: "cod", status: "kedaluwarsa", pickupDate: addDays(today, -6), pickupSlot: "16:00", createdAt: wibTimestamp(addDays(today, -8), "10:00:00"), holdExpiresAt: wibTimestamp(addDays(today, -7), "10:00:00") });
-//   await createOrder({ key: "SDK-DEMO-0009", userId: buyerTwo.id, productId: products["stiker-vinyl-ornamen-arema"].product.id, variantId: products["stiker-vinyl-ornamen-arema"].variants[0].id, quantity: 1, price: 8000, paymentMethod: "midtrans", status: "lewat_batas_pengambilan", pickupDate: addDays(today, -12), pickupSlot: "12:00", createdAt: wibTimestamp(addDays(today, -20), "10:00:00"), pickupDeadline: wibTimestamp(addDays(today, -5), "23:59:00"), payment: { status: "settlement", paidAt: wibTimestamp(addDays(today, -20), "10:05:00"), transactionId: "demo-midtrans-0009" } });
-//   await createOrder({ key: "SDK-DEMO-0010", userId: buyerThree.id, productId: products["kartu-pos-sudut-kayutangan"].product.id, variantId: products["kartu-pos-sudut-kayutangan"].variants[0].id, quantity: 1, price: 15000, paymentMethod: "cod", status: "menunggu_bayar", pickupDate: addDays(today, 5), pickupSlot: "17:00", createdAt: wibTimestamp(today, "11:00:00"), holdExpiresAt: wibTimestamp(addDays(today, 1), "23:59:00") });
-
-//   const historicalProducts = [
-//     ["kartu-pos-sudut-kayutangan", buyer.id, 15000, "09:00"],
-//     ["pin-enamel-trem-antik-malang", buyerTwo.id, 35000, "11:00"],
-//     ["tote-bag-kanvas-singosari", buyerThree.id, 65000, "14:00"],
-//     ["notebook-sampul-kain", buyer.id, 32000, "16:00"],
-//   ] as const;
-//   for (let months = 3; months >= 1; months--) {
-//     const month = monthsAgo(today, months);
-//     for (const [index, [productKey, userId, price, pickupSlot]] of historicalProducts.entries()) {
-//       const pickupDate = addDays(`${month}-01`, 5 + index * 4);
-//       const orderNumber = `SDK-HIST-${month.replace("-", "")}-${index + 1}`;
-//       const paymentMethod = index % 2 === 0 ? "midtrans" : "cod";
-//       await createOrder({
-//         key: orderNumber,
-//         userId,
-//         productId: products[productKey].product.id,
-//         variantId: products[productKey].variants[0].id,
-//         quantity: index === 3 ? 2 : 1,
-//         price,
-//         paymentMethod,
-//         status: "selesai",
-//         pickupDate,
-//         pickupSlot,
-//         createdAt: wibTimestamp(addDays(pickupDate, -1), "10:00:00"),
-//         pickupDeadline: paymentMethod === "midtrans" ? wibTimestamp(addDays(pickupDate, 14), "23:59:00") : null,
-//         completedAt: wibTimestamp(pickupDate, "16:30:00"),
-//         payment: paymentMethod === "midtrans" ? { status: "settlement", paidAt: wibTimestamp(addDays(pickupDate, -1), "10:05:00"), transactionId: `hist-${month}-${index + 1}` } : undefined,
-//       });
-//     }
-//     await createOrder({ key: `SDK-HIST-${month.replace("-", "")}-CANCEL`, userId: buyerTwo.id, productId: products["stiker-vinyl-ornamen-arema"].product.id, variantId: products["stiker-vinyl-ornamen-arema"].variants[0].id, quantity: 1, price: 8000, paymentMethod: "midtrans", status: "dibatalkan", pickupDate: addDays(`${month}-01`, 22), pickupSlot: "10:00", createdAt: wibTimestamp(addDays(`${month}-01`, 18), "10:00:00"), pickupDeadline: wibTimestamp(addDays(`${month}-01`, 36), "23:59:00"), cancelReason: "permintaan_pembeli", payment: { status: "expire", paidAt: null, transactionId: `hist-cancel-${month}` } });
-//     await createOrder({ key: `SDK-HIST-${month.replace("-", "")}-EXPIRED`, userId: buyerThree.id, productId: products["gantungan-kunci-kayu-ojek"].product.id, variantId: products["gantungan-kunci-kayu-ojek"].variants[0].id, quantity: 1, price: 18000, paymentMethod: "cod", status: "kedaluwarsa", pickupDate: addDays(`${month}-01`, 25), pickupSlot: "12:00", createdAt: wibTimestamp(addDays(`${month}-01`, 23), "10:00:00"), holdExpiresAt: wibTimestamp(addDays(`${month}-01`, 24), "10:00:00") });
-//   }
-
-//   const historyMovements = [
-//     ["seed-stock-history-opname", "kartu-pos-sudut-kayutangan", "opname", -3, 22, "Hasil opname bulanan Oktober", addDays(today, -36)],
-//     ["seed-stock-history-cashier", "pin-enamel-trem-antik-malang", "terjual_kasir", -2, 13, "Penjualan kasir tidak masuk laporan aplikasi", addDays(today, -29)],
-//     ["seed-stock-history-damaged", "tote-bag-kanvas-singosari", "rusak_hilang", -1, 11, "Kemasan rusak saat penyimpanan", addDays(today, -24)],
-//     ["seed-stock-history-correction", "notebook-sampul-kain", "koreksi", 2, 9, "Koreksi hasil hitung stok", addDays(today, -17)],
-//   ] as const;
-//   for (const [id, productKey, reason, delta, stockAfter, note, date] of historyMovements) {
-//     await prisma.stockMovement.upsert({ where: { id }, update: { productId: products[productKey].product.id, variantId: products[productKey].variants[0].id, reason, delta, stockAfter, note, actorId: admin.id, createdAt: wibTimestamp(date, "15:00:00") }, create: { id, productId: products[productKey].product.id, variantId: products[productKey].variants[0].id, reason, delta, stockAfter, note, actorId: admin.id, createdAt: wibTimestamp(date, "15:00:00") } });
-//   }
-
-//   await prisma.review.upsert({ where: { orderItemId: `seed-item-sdk-demo-0006` }, update: { userId: buyerTwo.id, productId: products["pin-enamel-trem-antik-malang"].product.id, rating: 5, comment: "Barangnya rapi, detailnya bagus, dan kemasannya aman.", status: "tampil", createdAt: wibTimestamp(addDays(today, -4), "16:00:00") }, create: { id: "seed-review-order-0006", orderItemId: completedForReview.itemId, userId: buyerTwo.id, productId: products["pin-enamel-trem-antik-malang"].product.id, rating: 5, comment: "Barangnya rapi, detailnya bagus, dan kemasannya aman.", status: "tampil", createdAt: wibTimestamp(addDays(today, -4), "16:00:00") } });
-//   await prisma.review.upsert({ where: { id: "seed-review-buyer-0005" }, update: { orderItemId: "seed-item-sdk-demo-0005", userId: buyer.id, productId: products["zine-cerita-kajoetangan"].product.id, rating: 5, comment: "Zine-nya menarik dan ilustrasinya membuat saya ingin jalan-jalan lagi di Kayutangan.", status: "tampil", createdAt: wibTimestamp(addDays(today, -2), "14:00:00") }, create: { id: "seed-review-buyer-0005", orderItemId: "seed-item-sdk-demo-0005", userId: buyer.id, productId: products["zine-cerita-kajoetangan"].product.id, rating: 5, comment: "Zine-nya menarik dan ilustrasinya membuat saya ingin jalan-jalan lagi di Kayutangan.", status: "tampil", createdAt: wibTimestamp(addDays(today, -2), "14:00:00") } });
-//   await prisma.review.upsert({ where: { id: "seed-review-hidden" }, update: { userId: buyerThree.id, productId: products["tatakan-gelas-kayu-jati"].product.id, rating: 2, comment: "Ulasan contoh yang disembunyikan admin untuk demo moderasi.", status: "disembunyikan", createdAt: wibTimestamp(addDays(today, -18), "13:00:00") }, create: { id: "seed-review-hidden", userId: buyerThree.id, productId: products["tatakan-gelas-kayu-jati"].product.id, rating: 2, comment: "Ulasan contoh yang disembunyikan admin untuk demo moderasi.", status: "disembunyikan", createdAt: wibTimestamp(addDays(today, -18), "13:00:00") } });
-//   for (const [id, userId, rating, comment, createdAt] of [["seed-review-general-1", buyer.id, 5, "Toko kecil yang kurasinya terasa personal. Banyak produk unik untuk oleh-oleh.", addDays(today, -28)], ["seed-review-general-2", buyerThree.id, 4, "Pickup mudah dan adminnya responsif saat saya bertanya lewat WhatsApp.", addDays(today, -11)]] as const) await prisma.review.upsert({ where: { id }, update: { userId, productId: null, rating, comment, status: "tampil", createdAt: wibTimestamp(createdAt, "12:00:00") }, create: { id, userId, productId: null, rating, comment, status: "tampil", createdAt: wibTimestamp(createdAt, "12:00:00") } });
-
-//   const applications = [
-//     { id: "seed-application-buyer-pending", userId: buyer.id, applicantName: buyer.name, contact: "081298765432", brandName: "Budi Kayu", categoryId: categories["kriya-kayu"].id, description: "Pengajuan demo milik akun buyer utama untuk mencoba halaman status pengajuan.", status: "pending" as const, samplePhotos: [imageUrls.craft] },
-//     { id: "seed-application-pending", userId: applicant.id, applicantName: applicant.name, contact: "081234567890", brandName: "Nadia Keramik", categoryId: categories.keramik.id, description: "Saya membuat keramik kecil dengan motif flora dari halaman rumah di Malang.", status: "pending" as const, samplePhotos: [imageUrls.ceramic, imageUrls.craft] },
-//     { id: "seed-application-rejected", userId: buyerThree.id, applicantName: buyerThree.name, contact: "082233445566", brandName: "Rizal Print", categoryId: categories.zine.id, description: "Saya ingin menitipkan produk cetak dan poster ilustrasi.", status: "ditolak" as const, rejectReason: "Mohon tambahkan foto proses dan contoh kemasan produk.", samplePhotos: [] },
-//     { id: "seed-application-approved", userId: creatorDiniUser.id, applicantName: creatorDiniUser.name, contact: "081122334455", brandName: artisanDini.brandName, categoryId: categories.postcard.id, description: "Pengajuan kreator yang sudah diterima untuk data riwayat.", status: "diterima" as const, samplePhotos: [imageUrls.postcard] },
-//   ];
-//   for (const application of applications) {
-//     const ageDays = application.status === "pending" ? 15 : application.id.includes("rejected") ? 80 : 120;
-//     const submittedAt = wibTimestamp(addDays(today, -ageDays), "10:00:00");
-//     const decidedAt = application.status === "pending" ? null : wibTimestamp(addDays(today, -(ageDays - 3)), "15:00:00");
-//     await prisma.artisanApplication.upsert({ where: { id: application.id }, update: { ...application, submittedAt, decidedAt }, create: { ...application, submittedAt, decidedAt } });
-//   }
-
-//   await upsertNotification({ id: "seed-notification-buyer-order", userId: buyer.id, type: "pesanan_update", title: "Pesanan siap diambil", body: "Pesanan SDK-DEMO-0001 sudah lunas dan dapat diambil hari ini pukul 10:00.", createdAt: wibTimestamp(today, "08:30:00") });
-//   await upsertNotification({ id: "seed-notification-buyer-holiday", userId: buyer.id, type: "libur_terdampak", title: "Pickup terdampak jadwal libur", body: `Toko libur pada tanggal pickup ${holidayDate}. Pesanan dapat diambil kapan saja saat toko buka dan admin akan menghubungi lewat WhatsApp.`, createdAt: wibTimestamp(today, "09:20:00") });
-//   await upsertNotification({ id: "seed-notification-buyer-review", userId: buyer.id, type: "umum", title: "Terima kasih sudah berbelanja", body: "Jangan lupa ceritakan pengalamanmu setelah mengambil pesanan.", isRead: true, createdAt: wibTimestamp(addDays(today, -1), "12:00:00") });
-//   await upsertNotification({ id: "seed-notification-buyer-application", userId: buyer.id, type: "umum", title: "Pengajuan kreator diterima sistem", body: "Pengajuan Budi Kayu sedang menunggu pemeriksaan admin.", createdAt: wibTimestamp(today, "09:30:00") });
-//   await upsertNotification({ id: "seed-notification-creator-application-approved", userId: creatorDiniUser.id, type: "pengajuan_diterima", title: "Pengajuan kreator diterima", body: "Pengajuan toko Dini Draws telah diterima. Selamat berkarya di SDKM.", isRead: true, createdAt: wibTimestamp(addDays(today, -12), "15:00:00") });
-//   await upsertNotification({ id: "seed-notification-buyer-application-rejected", userId: buyerThree.id, type: "pengajuan_ditolak", title: "Pengajuan kreator perlu dilengkapi", body: "Pengajuan Rizal Print ditolak. Mohon tambahkan foto proses dan contoh kemasan produk.", createdAt: wibTimestamp(addDays(today, -12), "15:00:00") });
-//   await upsertNotification({ id: "seed-notification-creator-approved", userId: creatorDiniUser.id, type: "produk_disetujui", title: "Produk disetujui", body: "Produk Kartu Pos Sudut Kayutangan sudah disetujui dan tampil di katalog.", createdAt: wibTimestamp(addDays(today, -2), "11:00:00") });
-//   await upsertNotification({ id: "seed-notification-creator-rejected", userId: creatorDemoUser.id, type: "produk_ditolak", title: "Produk perlu revisi", body: "Produk Stiker Sketsa Alun-Alun ditolak. Foto produk dan deskripsi perlu diperjelas sebelum disetujui.", createdAt: wibTimestamp(addDays(today, -1), "13:00:00") });
-//   await upsertNotification({ id: "seed-notification-creator-hidden", userId: creatorRaraUser.id, type: "produk_disembunyikan", title: "Produk disembunyikan", body: "Pouch Kanvas Motif Ubin sementara disembunyikan untuk penataan katalog.", createdAt: wibTimestamp(addDays(today, -3), "13:00:00") });
-//   await upsertNotification({ id: "seed-notification-creator-withdrawn", userId: creatorDiniUser.id, type: "produk_ditarik", title: "Produk ditarik", body: "Kartu Pos Gang Lama ditarik karena tidak laku selama 6 bulan.", isRead: true, createdAt: wibTimestamp(addDays(today, -4), "13:00:00") });
-//   await upsertNotification({ id: "seed-notification-creator-stock", userId: creatorBagasUser.id, type: "stok_menipis", title: "Stok menipis", body: "Stok Tatakan Gelas Kayu Jati Kayutangan tersisa 2.", createdAt: wibTimestamp(today, "10:00:00") });
-//   await upsertNotification({ id: "seed-notification-creator-slow", userId: creatorDemoUser.id, type: "produk_mendekati_batas", title: "Produk mendekati batas", body: "Rak Mini Kayu Kampung sudah 155 hari belum terjual. Pertimbangkan evaluasi produk.", createdAt: wibTimestamp(addDays(today, -1), "10:00:00") });
-//   await upsertNotification({ id: "seed-notification-creator-report", userId: creatorDiniUser.id, type: "laporan_final", title: "Laporan bulanan tersedia", body: `Laporan bulan ${reportMonth} sudah difinalkan.`, createdAt: wibTimestamp(addDays(today, -2), "15:00:00") });
-//   await upsertNotification({ id: "seed-notification-creator-review", userId: creatorBagasUser.id, type: "ulasan_baru", title: "Ulasan baru", body: "Produk Pin Enamel Trem Antik Malang mendapatkan ulasan baru.", isRead: true, createdAt: wibTimestamp(addDays(today, -5), "16:00:00") });
-//   for (let months = 3; months >= 1; months--) {
-//     const month = monthsAgo(today, months);
-//     await upsertNotification({ id: `seed-notification-history-order-${month}`, userId: buyer.id, type: "pesanan_update", title: "Pesanan selesai", body: `Pesanan historis SDK-HIST-${month.replace("-", "")} selesai diproses.`, isRead: true, createdAt: wibTimestamp(`${month}-25`, "17:00:00") });
-//     await upsertNotification({ id: `seed-notification-history-report-${month}`, userId: creatorDiniUser.id, type: "laporan_final", title: "Laporan bulanan tersedia", body: `Laporan bulan ${month} sudah difinalkan oleh admin.`, isRead: true, createdAt: wibTimestamp(`${month}-28`, "16:00:00") });
-//   }
-
-//   for (let months = 3; months >= 1; months--) {
-//     const month = monthsAgo(today, months);
-//     const snapshot = await calculateMonthlyReport(month, prisma);
-//     const finalizedDate = addDays(addMonths(`${month}-01`, 1), -1);
-//     await prisma.monthlyReport.upsert({ where: { month }, update: { status: "final", finalizedAt: wibTimestamp(finalizedDate, "16:00:00"), finalizedById: admin.id, snapshot: snapshot as any }, create: { month, status: "final", finalizedAt: wibTimestamp(finalizedDate, "16:00:00"), finalizedById: admin.id, snapshot: snapshot as any } });
-//   }
-
-//   const reportOrders = [
-//     ["SDK-DEMO-0005", "zine-cerita-kajoetangan", -2, 10],
-//     ["SDK-DEMO-0011", "tote-bag-kanvas-singosari", -1, 14],
-//     ["SDK-DEMO-0012", "notebook-sampul-kain", -2, 15],
-//   ] as const;
-//   for (const [orderNumber, productKey, delta, hour] of reportOrders) {
-//     const reportOrder = await prisma.order.findUniqueOrThrow({ where: { orderNumber } });
-//     const product = products[productKey];
-//     await prisma.stockMovement.upsert({ where: { id: `seed-stock-sale-${orderNumber.toLowerCase()}` }, update: { productId: product.product.id, variantId: product.variants[0].id, delta, stockAfter: product.variants[0].stock, reason: "pesanan", orderId: reportOrder.id, actorId: null, note: "Penjualan melalui aplikasi", createdAt: wibTimestamp(reportDate, `${String(hour).padStart(2, "0")}:05:00`) }, create: { id: `seed-stock-sale-${orderNumber.toLowerCase()}`, productId: product.product.id, variantId: product.variants[0].id, delta, stockAfter: product.variants[0].stock, reason: "pesanan", orderId: reportOrder.id, actorId: null, note: "Penjualan melalui aplikasi", createdAt: wibTimestamp(reportDate, `${String(hour).padStart(2, "0")}:05:00`) } });
-//   }
-
-//   console.log("Seed selesai.");
-//   console.log(`Akun admin: ${admin.email}`);
-//   console.log(`Akun admin demo: ${demoAdmin.email}`);
-//   console.log(`Akun buyer demo: ${buyer.email}`);
-//   console.log(`Akun kreator demo: ${creatorDemoUser.email}`);
-//   console.log(`Laporan final tersedia untuk ${reportMonth}.`);
-//   console.log("Sebagian produk memakai gambar HTTPS dan sebagian memakai images kosong untuk menguji fallback UI.");
-// }
-
-// main()
-//   .catch((error) => {
-//     console.error("Seed gagal:", error);
-//     process.exit(1);
-//   })
-//   .finally(async () => {
-//     await prisma.$disconnect();
-//   });
-
 /**
  * prisma/seed.ts — Seeder DEMO "Sesuatu DariKota Malang" (SDKM)
  *
@@ -536,7 +133,7 @@ const CATEGORIES: ReadonlyArray<readonly [string, string, string, string]> = [
   ["kriya-kayu", "Kriya Kayu", "Gantungan dan hiasan kayu", "tree-pine"],
   ["tote-bag", "Tote Bag", "Tas kanvas hasil sablon", "shopping-bag"],
   ["keramik", "Keramik", "Mug dan cangkir tanah liat", "coffee"],
-  ["zine", "Zine", "Buku kecil cerita kota", "book-open"],
+  ["lainnya", "Lainnya", "Karya kriya & cinderamata lainnya", "more-horizontal"],
 ];
 
 interface CreatorSpec {
@@ -561,9 +158,9 @@ function creatorSpecs(demoCreatorEmail: string): CreatorSpec[] {
     { key: "dini", name: "Dini Aulia", email: "dini@sesuatudarikota.com", brand: "Dini Draws", bio: "Ilustrator yang menggambar sudut Kayutangan, genteng tua, dan jendela heritage Malang.", userAvatar: "portrait", shopAvatar: null, share: null, status: "aktif", joinedAgo: 230, phone: "081122334455", appCat: "postcard", appDesc: "Saya menggambar kartu pos dan stiker bertema bangunan tua Malang dengan cat air." },
     { key: "bagas", name: "Bagas Pratama", email: "bagas@sesuatudarikota.com", brand: "Bagas Pin Co", bio: "Perajin pin, kayu, dan keramik kecil yang terinspirasi dari cerita kota Malang.", userAvatar: "portraitTwo", shopAvatar: "portraitTwo", share: 75, status: "aktif", joinedAgo: 226, phone: "081233445566", appCat: "pin-enamel", appDesc: "Membuat pin enamel dan kriya kayu kecil dengan ikon-ikon kota Malang." },
     { key: "rara", name: "Rara Kamila", email: "rara@sesuatudarikota.com", brand: "Rara Sablon", bio: "Sablon manual satu per satu dengan motif ornamen rumah tua dan kampung heritage.", userAvatar: null, shopAvatar: null, share: null, status: "aktif", joinedAgo: 218, phone: "081344556677", appCat: "apparel", appDesc: "Sablon manual di kaos dan tote bag dengan motif ornamen rumah tua." },
-    { key: "alya", name: "Alya Prameswari", email: demoCreatorEmail, brand: "Alya Handmade", bio: "Toko demo kreator dengan koleksi kecil kerajinan, jurnal, dan cerita di balik prosesnya.", userAvatar: "portraitThree", shopAvatar: "portraitThree", share: 65, status: "aktif", joinedAgo: 212, phone: "081455667788", appCat: "zine", appDesc: "Jurnal dan notebook sampul kain, plus kriya kayu kecil buatan sendiri." },
+    { key: "alya", name: "Alya Prameswari", email: demoCreatorEmail, brand: "Alya Handmade", bio: "Toko demo kreator dengan koleksi kecil kerajinan, jurnal, dan cerita di balik prosesnya.", userAvatar: "portraitThree", shopAvatar: "portraitThree", share: 65, status: "aktif", joinedAgo: 212, phone: "081455667788", appCat: "lainnya", appDesc: "Jurnal dan notebook sampul kain, plus kriya kayu kecil buatan sendiri." },
     { key: "sinta", name: "Sinta Maharani", email: "sinta@sesuatudarikota.com", brand: "Tanah Dinoyo", bio: "Pengrajin gerabah dari kampung keramik Dinoyo. Setiap mug dibakar dan diglasir satu per satu.", userAvatar: null, shopAvatar: "portrait", share: 60, status: "aktif", joinedAgo: 205, phone: "081566778899", appCat: "keramik", appDesc: "Keramik gerabah Dinoyo: mug, vas, dan piring hias dengan glasir hijau botol." },
-    { key: "yoga", name: "Yoga Prasetyo", email: "yoga@sesuatudarikota.com", brand: "Malang Tempo Doeloe", bio: "Mengumpulkan arsip foto dan peta lama Malang, lalu mengolahnya jadi zine, poster, dan kaos.", userAvatar: null, shopAvatar: null, share: null, status: "aktif", joinedAgo: 200, phone: "081677889900", appCat: "zine", appDesc: "Zine, poster, dan kaos dari arsip foto serta peta lama kota Malang." },
+    { key: "yoga", name: "Yoga Prasetyo", email: "yoga@sesuatudarikota.com", brand: "Malang Tempo Doeloe", bio: "Mengumpulkan arsip foto dan peta lama Malang, lalu mengolahnya jadi cinderamata, poster, dan kaos.", userAvatar: null, shopAvatar: null, share: null, status: "aktif", joinedAgo: 200, phone: "081677889900", appCat: "postcard", appDesc: "Poster, kartu pos, dan kaos dari arsip foto serta peta lama kota Malang." },
     { key: "hendra", name: "Hendra Wijaya", email: "hendra@sesuatudarikota.com", brand: "Kayu Kampung Studio", bio: "Kriya kayu jati sisa perajin mebel Kampung Kayutangan. Sedang vakum sementara.", userAvatar: null, shopAvatar: null, share: 70, status: "nonaktif", joinedAgo: 186, phone: "081788990011", appCat: "kriya-kayu", appDesc: "Gantungan dan hiasan dinding dari kayu jati sisa produksi mebel.", deactivatedAgo: 38 },
   ];
 }
@@ -599,7 +196,7 @@ const PRODUCTS: ProductSpec[] = [
   { key: "kartu-pos-pasar-bunga", seller: "dini", cat: "postcard", name: "Kartu Pos Pasar Bunga Splendid", price: 15000, short: "Suasana pasar bunga yang berwarna.", desc: "Kartu pos bergambar kios-kios bunga Pasar Splendid dengan warna cat air yang hangat.", photos: ["paper"], added: 112, stock: 30, w: 6, q: 4.6 },
   { key: "stiker-vinyl-ornamen-arema", seller: "dini", cat: "stiker", name: "Stiker Vinyl Ornamen Arema Klasik", price: 8000, short: "Stiker tahan air grafis klasik Malang.", desc: "Stiker vinyl tahan air dengan grafis tipografi khas Arema klasik untuk laptop, botol, dan jurnal.", photos: ["art"], added: 140, stock: 45, w: 9, q: 4.7 },
   { key: "stiker-set-bangunan-heritage", seller: "dini", cat: "stiker", name: "Set Stiker Bangunan Heritage Malang", price: 22000, short: "Satu set stiker bangunan ikonik.", desc: "Set 8 stiker vinyl bergambar bangunan ikonik Malang: Balai Kota, Tugu, Toko Oen, dan lainnya.", photos: [], added: 72, stock: 18, w: 4, q: 4.0 },
-  { key: "zine-cerita-kajoetangan", seller: "dini", cat: "zine", name: "Zine Cerita Kampung Kajoetangan", price: 28000, short: "Buku saku ilustrasi dan esai foto warga.", desc: "Buku saku mini berisi esai foto dan sketsa warga tertua di koridor Kayutangan.", photos: ["paper", "workspace"], added: 125, stock: 16, w: 6, q: 4.7 },
+  { key: "zine-cerita-kajoetangan", seller: "dini", cat: "lainnya", name: "Buku Saku Cerita Kampung Kajoetangan", price: 28000, short: "Buku saku ilustrasi dan esai foto warga.", desc: "Buku saku mini berisi esai foto dan sketsa warga tertua di koridor Kayutangan.", photos: ["paper", "workspace"], added: 125, stock: 16, w: 6, q: 4.7 },
   { key: "kartu-pos-gang-lama", seller: "dini", cat: "postcard", name: "Kartu Pos Gang Lama", price: 12000, short: "Produk lama yang sudah ditarik.", desc: "Kartu pos gang-gang sempit kampung lama. Produk ini sudah ditarik karena tidak laku selama enam bulan.", photos: [], added: 226, stock: 0, status: "ditarik", statusAgo: 40, note: "Tidak laku selama 6 bulan", noSales: true },
   { key: "stiker-hologram-tugu", seller: "dini", cat: "stiker", name: "Stiker Hologram Tugu Malang", price: 12000, short: "Stiker hologram ikon Tugu.", desc: "Stiker hologram dengan gambar Tugu Malang, dicetak di bahan metalik.", photos: [], added: 9, stock: 30, status: "ditolak", statusAgo: 7, note: "Bahan stiker hologram belum sesuai standar konsinyasi SDKM. Silakan ajukan ulang dengan bahan vinyl biasa.", noSales: true },
   { key: "tote-mini-ilustrasi-dini", seller: "dini", cat: "tote-bag", name: "Tote Bag Mini Ilustrasi Dini", price: 55000, short: "Tote bag mini ilustrasi sudut kota.", desc: "Tote bag kanvas ukuran mini dengan sablon ilustrasi sudut kota karya Dini.", photos: ["bag"], added: 0.2, stock: 12, status: "menunggu", noSales: true },
@@ -609,16 +206,16 @@ const PRODUCTS: ProductSpec[] = [
   { key: "pin-set-ikon-malang", seller: "bagas", cat: "pin-enamel", name: "Set Pin Mini Ikon Malang (3 pcs)", price: 75000, short: "Edisi terbatas, satu set tiga pin mini.", desc: "Satu set tiga pin mini ikon Malang dalam kotak kecil. Produksi terbatas, jumlah tidak banyak.", photos: ["craft", "art"], added: 60, stock: 0, w: 5, q: 4.9, cap: 6, limited: true },
   { key: "tatakan-gelas-kayu-jati", seller: "bagas", cat: "kriya-kayu", name: "Tatakan Gelas Kayu Jati Kayutangan", price: 25000, short: "Coaster kayu jati daur ulang halus.", desc: "Coaster kayu jati sisa perajin mebel lokal dengan ukiran inisial sudut Kayutangan.", photos: [], added: 130, stock: 2, w: 4, q: 3.7, cap: 9 },
   { key: "gantungan-kunci-kayu-ikon-malang", seller: "bagas", cat: "kriya-kayu", name: "Gantungan Kunci Kayu Ikon Malang", price: 18000, short: "Souvenir kayu kecil untuk oleh-oleh.", desc: "Gantungan kunci kayu ringan dengan bentuk ikon kota dan finishing minyak alami.", photos: ["craft"], added: 120, stock: 6, w: 4, q: 4.4 },
-  { key: "cangkir-keramik-dinoyo", seller: "bagas", cat: "keramik", name: "Cangkir Keramik Gerabah Dinoyo", price: 45000, short: "Cangkir glasir khas Dinoyo.", desc: "Cangkir tanah liat bakar khas kampung keramik Dinoyo dengan glasir antik pilihan warna.", photos: ["ceramic"], added: 135, stock: [8, 6], w: 6, q: 4.6, options: [{ name: "Warna", values: ["Hijau Botol", "Cokelat Tanah"] }], imageVariants: [["ceramic", "Warna", "Hijau Botol"], ["craft", "Warna", "Cokelat Tanah"]] },
+  { key: "cangkir-keramik-dinoyo", seller: "bagas", cat: "keramik", name: "Cangkir Keramik Gerabah Dinoyo", price: 45000, short: "Cangkir glasir khas Dinoyo.", desc: "Cangkir tanah liat bakar khas kampung keramik Dinoyo dengan glasir antik pilihan warna.", photos: ["ceramic"], added: 135, stock: [8, 0], w: 6, q: 4.6, options: [{ name: "Warna", values: ["Hijau Botol", "Cokelat Tanah"] }], imageVariants: [["ceramic", "Warna", "Hijau Botol"], ["craft", "Warna", "Cokelat Tanah"]] },
   /* --- Rara Sablon --- */
-  { key: "kaos-kerawang-malang-tempo-dulu", seller: "rara", cat: "apparel", name: "Kaos Kerawang Malang Tempo Dulu", price: 135000, short: "Kaos sablon manual motif rumah kuno.", desc: "Kaos katun combed dengan sablon manual motif ventilasi kerawang rumah kuno Klojen.", photos: ["textile", "bag"], added: 148, stock: [1, 7, 5, 0], w: 6, q: 4.7, options: [{ name: "Ukuran", values: ["S", "M", "L", "XL"] }], imageVariants: [["textile", "Ukuran", "M"], ["bag", "Ukuran", "L"]] },
-  { key: "kaos-ornamen-ubin-tegel", seller: "rara", cat: "apparel", name: "Kaos Sablon Motif Ubin Tegel", price: 125000, short: "Kaos motif ubin tegel tempo dulu.", desc: "Kaos katun dengan sablon motif ubin tegel rumah lama, tersedia dua warna dan tiga ukuran.", photos: ["textile"], added: 90, stock: [4, 6, 5, 3, 2, 4], w: 4, q: 4.1, options: [{ name: "Ukuran", values: ["M", "L", "XL"] }, { name: "Warna", values: ["Krem", "Hitam"] }] },
+  { key: "kaos-kerawang-malang-tempo-dulu", seller: "rara", cat: "apparel", name: "Kaos Kerawang Malang Tempo Dulu", price: 135000, short: "Kaos sablon manual motif rumah kuno.", desc: "Kaos katun combed dengan sablon manual motif ventilasi kerawang rumah kuno Klojen.", photos: ["textile", "bag"], added: 148, stock: [0, 7, 5, 0], w: 6, q: 4.7, options: [{ name: "Ukuran", values: ["S", "M", "L", "XL"] }], imageVariants: [["textile", "Ukuran", "M"], ["bag", "Ukuran", "L"]] },
+  { key: "kaos-ornamen-ubin-tegel", seller: "rara", cat: "apparel", name: "Kaos Sablon Motif Ubin Tegel", price: 125000, short: "Kaos motif ubin tegel tempo dulu.", desc: "Kaos katun dengan sablon motif ubin tegel rumah lama, tersedia dua warna dan tiga ukuran.", photos: ["textile"], added: 90, stock: [0, 6, 0, 3, 2, 0], w: 4, q: 4.1, options: [{ name: "Ukuran", values: ["M", "L", "XL"] }, { name: "Warna", values: ["Krem", "Hitam"] }] },
   { key: "tote-bag-kanvas-singosari", seller: "rara", cat: "tote-bag", name: "Tote Bag Kanvas Sablon Candi Singosari", price: 65000, short: "Tote bag kanvas tebal sablon Dwarapala.", desc: "Tote bag kanvas tebal dengan ritsleting dan sablon siluet arca Dwarapala Singosari.", photos: ["bag", "textile"], added: 140, stock: 12, w: 6, q: 4.6 },
   { key: "tote-bag-motif-trem", seller: "rara", cat: "tote-bag", name: "Tote Bag Motif Trem Antik", price: 70000, short: "Tote bag sablon trem uap Malang.", desc: "Tote bag kanvas dengan sablon trem uap Malang tempo dulu, tali panjang yang nyaman.", photos: [], added: 55, stock: 14, w: 4, q: 4.5 },
   { key: "pouch-kanvas-motif-ubin", seller: "rara", cat: "tote-bag", name: "Pouch Kanvas Motif Ubin", price: 48000, short: "Pouch kanvas motif ubin.", desc: "Pouch kanvas kecil bermotif ubin, cocok untuk alat tulis atau dompet koin.", photos: ["bag"], added: 100, stock: 5, w: 3, q: 4.4, status: "disembunyikan", statusAgo: 25, note: "Sementara disembunyikan untuk penataan katalog." },
   /* --- Alya Handmade (akun demo kreator) --- */
-  { key: "notebook-sampul-kain", seller: "alya", cat: "zine", name: "Notebook Sampul Kain Heritage", price: 32000, short: "Notebook daur ulang sampul kain.", desc: "Notebook kertas daur ulang dengan sampul kain bermotif ubin rumah lama.", photos: [], added: 115, stock: 7, w: 3, q: 4.4 },
-  { key: "jurnal-kertas-daur-ulang", seller: "alya", cat: "zine", name: "Jurnal Kertas Daur Ulang Heritage", price: 38000, short: "Jurnal polos kertas daur ulang tebal.", desc: "Jurnal polos berisi 80 halaman kertas daur ulang, dijilid benang manual.", photos: ["paper"], added: 80, stock: 12, w: 4, q: 4.6 },
+  { key: "notebook-sampul-kain", seller: "alya", cat: "lainnya", name: "Notebook Sampul Kain Heritage", price: 32000, short: "Notebook daur ulang sampul kain.", desc: "Notebook kertas daur ulang dengan sampul kain bermotif ubin rumah lama.", photos: [], added: 115, stock: 7, w: 3, q: 4.4 },
+  { key: "jurnal-kertas-daur-ulang", seller: "alya", cat: "lainnya", name: "Jurnal Kertas Daur Ulang Heritage", price: 38000, short: "Jurnal polos kertas daur ulang tebal.", desc: "Jurnal polos berisi 80 halaman kertas daur ulang, dijilid benang manual.", photos: ["paper"], added: 80, stock: 12, w: 4, q: 4.6 },
   { key: "bookmark-kayu-ukir-kayutangan", seller: "alya", cat: "kriya-kayu", name: "Bookmark Kayu Ukir Kayutangan", price: 14000, short: "Pembatas buku kayu ukir ornamen.", desc: "Pembatas buku dari kayu tipis dengan ukiran ornamen jendela heritage Kayutangan.", photos: ["craft"], added: 45, stock: 25, w: 5, q: 4.8 },
   { key: "kartu-pos-bunga-kertas", seller: "alya", cat: "postcard", name: "Kartu Pos Bunga Kertas", price: 14000, short: "Kartu pos bunga kertas warna-warni.", desc: "Kartu pos dengan ilustrasi bunga kertas yang tumbuh di pagar rumah-rumah lama.", photos: ["postcard"], added: 5, stock: 28, w: 4, q: 4.5 },
   { key: "rak-mini-kayu-kampung", seller: "alya", cat: "kriya-kayu", name: "Rak Mini Kayu Kampung", price: 85000, short: "Rak mini kayu sisa produksi.", desc: "Rak mini dari kayu sisa produksi mebel kampung yang belum banyak terjual.", photos: ["craft"], added: 155, stock: 3, noSales: true },
@@ -633,10 +230,10 @@ const PRODUCTS: ProductSpec[] = [
   { key: "piring-hias-mini-glasir", seller: "sinta", cat: "keramik", name: "Piring Hias Mini Glasir", price: 48000, short: "Piring hias mini untuk pajangan.", desc: "Piring hias mini bermotif flora dengan glasir bening, untuk pajangan atau tempat perhiasan.", photos: ["ceramic"], added: 162, stock: 4, noSales: true, oldSale: 158 },
   { key: "cangkir-cat-air-mini", seller: "sinta", cat: "keramik", name: "Cangkir Cat Air Mini", price: 40000, short: "Cangkir mini lukis cat air.", desc: "Cangkir mini dengan lukisan cat air bunga liar.", photos: [], added: 6, stock: 10, status: "ditolak", statusAgo: 4, note: "Foto produk belum menampilkan detail dari beberapa sisi. Mohon unggah foto tambahan.", noSales: true },
   /* --- Malang Tempo Doeloe --- */
-  { key: "zine-peta-malang-lama", seller: "yoga", cat: "zine", name: "Zine Peta Malang Lama", price: 30000, short: "Zine berisi peta-peta Malang lama.", desc: "Kumpulan peta kota Malang dari berbagai tahun lengkap dengan catatan singkat perubahannya.", photos: ["paper"], added: 186, stock: 8, noSales: true },
+  { key: "zine-peta-malang-lama", seller: "yoga", cat: "lainnya", name: "Buku Peta Malang Lama", price: 30000, short: "Buku berisi peta-peta Malang lama.", desc: "Kumpulan peta kota Malang dari berbagai tahun lengkap dengan catatan singkat perubahannya.", photos: ["paper"], added: 186, stock: 8, noSales: true },
   { key: "poster-a3-kayutangan-1920", seller: "yoga", cat: "postcard", name: "Poster A3 Kayutangan 1920-an", price: 55000, short: "Poster arsip foto Kayutangan 1920-an.", desc: "Poster ukuran A3 dari restorasi arsip foto koridor Kayutangan tahun 1920-an.", photos: ["art"], added: 60, stock: 15, w: 4, q: 4.7 },
   { key: "stiker-pack-tempo-doeloe", seller: "yoga", cat: "stiker", name: "Stiker Pack Tempo Doeloe", price: 20000, short: "Paket stiker arsip tempo dulu.", desc: "Paket stiker bergaya arsip foto hitam putih tempo dulu.", photos: ["art"], added: 45, stock: 40, w: 5, q: 4.6 },
-  { key: "kaos-arek-malang-heritage", seller: "yoga", cat: "apparel", name: "Kaos Arek Malang Edisi Heritage", price: 145000, short: "Kaos katun combed edisi heritage.", desc: "Kaos katun combed 24s dengan sablon plastisol peta lama Malang di bagian dada.", photos: ["textile"], added: 35, stock: [5, 8, 6], w: 4, q: 4.5, options: [{ name: "Ukuran", values: ["S", "M", "L"] }] },
+  { key: "kaos-arek-malang-heritage", seller: "yoga", cat: "apparel", name: "Kaos Arek Malang Edisi Heritage", price: 145000, short: "Kaos katun combed edisi heritage.", desc: "Kaos katun combed 24s dengan sablon plastisol peta lama Malang di bagian dada.", photos: ["textile"], added: 35, stock: [0, 8, 0], w: 4, q: 4.5, options: [{ name: "Ukuran", values: ["S", "M", "L"] }] },
   { key: "kartu-pos-set-alun-alun-tugu", seller: "yoga", cat: "postcard", name: "Kartu Pos Set Alun-Alun Tugu (5 pcs)", price: 55000, short: "Set lima kartu pos alun-alun dan Tugu.", desc: "Set lima kartu pos bergambar alun-alun dan Tugu Malang dari arsip foto lama.", photos: ["postcard", "paper"], added: 1, stock: 15, status: "menunggu", noSales: true },
   /* --- Kayu Kampung Studio (kreator nonaktif) --- */
   { key: "gantungan-kunci-wayang-kayu", seller: "hendra", cat: "kriya-kayu", name: "Gantungan Kunci Wayang Kayu", price: 20000, short: "Gantungan kunci wayang dari kayu jati.", desc: "Gantungan kunci berbentuk wayang kulit mini dari kayu jati sisa.", photos: ["craft"], added: 120, stock: 10, w: 3, q: 4.4 },
@@ -645,9 +242,11 @@ const PRODUCTS: ProductSpec[] = [
   { key: "mug-lukis-tangan-pasar-besar", seller: "official", cat: "keramik", name: "Mug Lukis Tangan Pasar Besar", price: 55000, short: "Mug oleh-oleh lini toko.", desc: "Mug lini toko dengan ilustrasi suasana Pasar Besar Malang dan pegangan nyaman.", photos: ["ceramic", "craft"], added: 200, stock: 18, w: 8, q: 4.7, limited: true },
   { key: "tote-bag-official-kayutangan", seller: "official", cat: "tote-bag", name: "Tote Bag Official Kayutangan", price: 60000, short: "Tote bag kanvas lini toko.", desc: "Tote bag kanvas dengan logo Sesuatu DariKota dan ilustrasi koridor Kayutangan.", photos: ["bag"], added: 170, stock: 20, w: 5, q: 4.5 },
   { key: "paket-kartu-pos-oleh-oleh", seller: "official", cat: "postcard", name: "Paket Kartu Pos Oleh-Oleh Malang (6 pcs)", price: 40000, short: "Paket enam kartu pos pilihan toko.", desc: "Paket enam kartu pos pilihan toko dari berbagai kreator lokal, cocok untuk oleh-oleh.", photos: ["postcard", "paper"], added: 160, stock: 24, w: 6, q: 4.8 },
-  { key: "kaos-official-sesuatu-darikota", seller: "official", cat: "apparel", name: "Kaos Official Sesuatu DariKota", price: 120000, short: "Kaos katun lini toko.", desc: "Kaos katun combed dengan sablon logo Sesuatu DariKota di dada.", photos: ["textile"], added: 150, stock: [3, 9, 10, 5], w: 5, q: 4.5, options: [{ name: "Ukuran", values: ["S", "M", "L", "XL"] }] },
+  { key: "kaos-official-sesuatu-darikota", seller: "official", cat: "apparel", name: "Kaos Official Sesuatu DariKota", price: 120000, short: "Kaos katun lini toko.", desc: "Kaos katun combed dengan sablon logo Sesuatu DariKota di dada.", photos: ["textile"], added: 150, stock: [0, 9, 10, 5], w: 5, q: 4.5, options: [{ name: "Ukuran", values: ["S", "M", "L", "XL"] }] },
   { key: "pin-enamel-logo-sdkm", seller: "official", cat: "pin-enamel", name: "Pin Enamel Logo Sesuatu DariKota", price: 30000, short: "Pin enamel logo toko.", desc: "Pin enamel dengan logo Sesuatu DariKota Malang.", photos: [], added: 140, stock: 18, w: 4, q: 4.4 },
   { key: "stiker-pack-kayutangan-official", seller: "official", cat: "stiker", name: "Stiker Pack Kayutangan Official", price: 15000, short: "Paket stiker kawasan Kayutangan.", desc: "Paket stiker bertema kawasan Kayutangan Heritage dari lini toko.", photos: ["art"], added: 130, stock: 35, w: 6, q: 4.6 },
+  { key: "korek-api-kayu-heritage-malang", seller: "official", cat: "lainnya", name: "Korek Api Kayu Vintage Malang", price: 12000, short: "Korek api kayu retro suvenir khas.", desc: "Korek api batang kayu vintage dengan kotak bergambar ilustrasi hotel dan trem tua Malang.", photos: ["craft"], added: 110, stock: 25, w: 5, q: 4.7 },
+  { key: "pembatas-buku-kuningan-kayutangan", seller: "bagas", cat: "lainnya", name: "Pembatas Buku Plat Kuningan Kayutangan", price: 28000, short: "Pembatas buku etsa plat kuningan.", desc: "Pembatas buku berbahan plat kuningan tipis dengan teknik etsa motif arsitektur kolonial Kayutangan.", photos: ["craft"], added: 95, stock: 15, w: 4, q: 4.8 },
 ];
 
 interface StorySpec { title: string; content: string; process: string | null; cover: string | null; proc: string[] }
@@ -703,7 +302,7 @@ const COMMENT_TAIL: Record<string, string> = {
   "kriya-kayu": "Kayunya halus dan wangi alami.",
   "tote-bag": "Kanvasnya tebal, muat banyak.",
   keramik: "Glasirnya cantik dan nyaman dipegang.",
-  zine: "Isinya menarik, enak dibaca santai.",
+  lainnya: "Karya yang unik, tidak biasa ditemukan di tempat lain.",
 };
 const HIDDEN_REVIEW_TEXTS: Array<[number, string]> = [
   [1, "Dasar toko abal-abal, admin sombong!! pelayanan sampah"],
@@ -1114,7 +713,7 @@ export async function runSeed(prisma: PrismaClient): Promise<SeedSummary> {
     appRows.push({ id: `seed-application-pending-${u.key}`, userId: u.id, applicantName: u.name, contact: `0812${rint(10000000, 99999999)}`, brandName: brand, categoryId: catIdOf(cat), description: desc, samplePhotos: urls(ph), status: "pending", submittedAt: agoDate(ago) });
   }
   const rejectedApps: Array<[UserRec, string, string, string, string, number]> = [
-    [rizal, "Rizal Print", "zine", "Saya ingin menitipkan produk cetak dan poster ilustrasi.", "Mohon tambahkan foto proses dan contoh kemasan produk.", 20],
+    [rizal, "Rizal Print", "lainnya", "Saya ingin menitipkan produk cetak dan poster ilustrasi.", "Mohon tambahkan foto proses dan contoh kemasan produk.", 20],
     [generated[1], "Bima Poster", "postcard", "Poster dan kartu pos bergaya vintage dari foto internet.", "Karya masih menyerupai ilustrasi yang sudah ada di katalog. Silakan ajukan ulang dengan karya orisinal.", 45],
   ];
   for (const [u, brand, cat, desc, reason, ago] of rejectedApps) {
@@ -1130,11 +729,18 @@ export async function runSeed(prisma: PrismaClient): Promise<SeedSummary> {
     if (sp.noSales || sp.status === "menunggu" || sp.status === "ditolak" || sp.status === "ditarik") return false;
     if (sp.status === "disembunyikan" && p.statusAt && t.getTime() >= p.statusAt.getTime()) return false;
     if (p.creator?.deactivatedAt && t.getTime() >= p.creator.deactivatedAt.getTime()) return false;
+    if (!p.variants.some((v) => v.avail > 0)) return false;
     if (sp.cap !== undefined && p.assigned >= sp.cap) return false;
     return t.getTime() >= p.createdAt.getTime() + DAY;
   });
   const pickBuyer = (t: Date, exclude?: Set<string>): UserRec | null => weightedPick(allBuyers.filter((u) => u.weight > 0 && u.createdAt.getTime() <= t.getTime() - 2 * HOUR && !exclude?.has(u.id)), (u) => u.weight);
-  const pickVariant = (p: ProductRec): VariantRec => pick(p.variants);
+  // Pesanan historis hanya mengambil varian yang masih punya stok target.
+  // Dengan begitu angka 0 pada spec.stock benar-benar tampil sebagai varian habis
+  // setelah seeder selesai, bukan terisi ulang oleh pesanan sintetis.
+  const pickVariant = (p: ProductRec): VariantRec => {
+    const available = p.variants.filter((v) => v.avail > 0);
+    return pick(available.length > 0 ? available : p.variants);
+  };
   const register = (o: OrderRec): OrderRec => { o.product.assigned++; orders.push(o); return o; };
 
   const decideOutcome = (t: Date, method: Method, date: string, slot: string, ext: number): Outcome => {
