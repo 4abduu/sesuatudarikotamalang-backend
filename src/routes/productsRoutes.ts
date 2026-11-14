@@ -11,6 +11,9 @@ router.get("/", productsController.listProducts);
 // GET /api/products/mine — A4: list produk milik kreator yang sedang login (sebelum /:id)
 router.get("/mine", requireAuth, requireRole("creator"), productsController.listMyProducts);
 
+// GET /api/products/:id/reviews — list ulasan produk (dukung filter rating, page, limit)
+router.get("/:id/reviews", productsController.getProductReviews);
+
 // GET /api/products/:id — detail satu produk (increment viewCount)
 router.get("/:id", productsController.getProductById);
 
