@@ -230,6 +230,12 @@ model Category {
   @@map("categories")
 }
 
+enum OlshopLinkMode {
+  tidak
+  toko
+  khusus
+}
+
 model Product {
   id               String   @id @default(cuid())
   artisanId        String
@@ -247,13 +253,17 @@ model Product {
   isActive         Boolean  @default(true) // admin bisa nonaktifkan produk (mis. 6 bulan tidak laku) tanpa menghapusnya — riwayat order/review yang sudah ada tetap utuh
   soldCount        Int      @default(0)
   viewCount        Int      @default(0)
-  // Catatan: field ini disediakan untuk kemungkinan produk yang juga
-  // dijual di Shopee/Tokopedia. Berdasarkan konfirmasi narasumber, produk
-  // yang dijual di e-commerce SAAT INI adalah barang milik toko sendiri
-  // (bukan barang konsinyasi kreator), jadi field ini kemungkinan besar
-  // kosong untuk semua produk konsinyasi — tapi tetap disediakan (nullable)
-  // untuk fleksibilitas kalau kebijakan itu berubah di kemudian hari.
-  shopeeUrl        String?
+  // Link marketplace (olshop). Tiap platform punya mode:
+  //   tidak  = tidak dijual di sana (tombol tidak tampil di mobile)
+  //   toko   = pakai URL toko dari AppSettings (mobile menampilkan peringatan)
+  //   khusus = pakai URL khusus produk (kolom *Url)
+  // URL divalidasi ketat di backend (lib/olshop.ts): HTTPS + daftar domain resmi.
+  shopeeMode       OlshopLinkMode @default(tidak)
+  shopeeUrl        String?  @db.VarChar(500)
+  tokopediaMode    OlshopLinkMode @default(tidak)
+  tokopediaUrl     String?  @db.VarChar(500)
+  tiktokshopMode   OlshopLinkMode @default(tidak)
+  tiktokshopUrl    String?  @db.VarChar(500)
   approvalStatus   ProductApprovalStatus @default(disetujui)
   statusNote       String?  @db.VarChar(300)
   withdrawnAt      DateTime?
@@ -424,6 +434,8 @@ model Review {
   createdAt   DateTime     @default(now())
 
   @@index([productId])
+  @@index([productId, createdAt])
+  @@index([productId, rating, createdAt])
   @@map("reviews")
 }
 
@@ -460,6 +472,11 @@ model AppSettings {
   pickupCloseTime     String   @default("23:00") @db.VarChar(5)
   pickupLeadMinutes   Int      @default(30)
   whatsappAdminNumber String?
+  contactEmail        String?  @db.VarChar(191) // email PUBLIK untuk halaman Tentang Kami (beda dengan notificationEmail yang internal)
+  aboutDescription    String?  @db.Text // deskripsi halaman Tentang Kami (teks biasa, paragraf dipisah baris kosong)
+  shopeeStoreUrl      String?  @db.VarChar(500) // link toko default per marketplace (dipakai produk bermode "toko")
+  tokopediaStoreUrl   String?  @db.VarChar(500)
+  tiktokshopStoreUrl  String?  @db.VarChar(500)
   notificationEmail   String?
   lowStockThreshold Int @default(5)
   defaultCreatorSharePercent Decimal @default(70) @db.Decimal(5, 2)

@@ -8,6 +8,7 @@ import { normalizeBrandKey } from "../lib/brandKey";
 import { presentArtisan } from "../lib/presentArtisan";
 import { addHolidayFields } from "../lib/holidays";
 import { serializeProductStatus } from "../lib/productStatus";
+import { clearStoreOlshopCache, validateOlshopUrl } from "../lib/olshop";
 import { createNotification, createOrderSoldNotifications } from "../dal/notifications";
 import { logger } from "../logger";
 
@@ -42,6 +43,9 @@ export const getDashboard = async (req: Request, res: Response, next: NextFuncti
       todaySlotOrders,
       pendingRefundCount,
       pendingRefundRows,
+      recentOrders,
+      recentApplications,
+      recentReviews,
     ] = await Promise.all([
       // 1. Pesanan dengan jadwal pickup HARI INI saja
       prisma.order.count({
@@ -60,18 +64,22 @@ export const getDashboard = async (req: Request, res: Response, next: NextFuncti
           product: { isActive: true, approvalStatus: "disetujui", withdrawnAt: null },
         },
       }),
-      // 4b. Daftar varian stok menipis (maks 10, terendah dulu) untuk kartu "Perlu Restock"
+      // 4b. Daftar varian stok menipis untuk kartu "Perlu Restock" (diurutkan stok terendah, lalu penjualan terbaru)
       prisma.productVariant.findMany({
         where: {
           stock: { lte: lowStockThreshold },
           product: { isActive: true, approvalStatus: "disetujui", withdrawnAt: null },
         },
-        orderBy: { stock: "asc" },
-        take: 10,
         select: {
+          id: true,
           stock: true,
           combination: true,
-          product: { select: { id: true, name: true } },
+          product: { select: { id: true, name: true, soldCount: true } },
+          orderItems: {
+            take: 1,
+            orderBy: { order: { createdAt: "desc" } },
+            select: { order: { select: { createdAt: true } } },
+          },
         },
       }),
       // 5. Distribusi status pesanan
@@ -141,6 +149,42 @@ export const getDashboard = async (req: Request, res: Response, next: NextFuncti
           payment: { select: { paidAt: true } },
         },
       }),
+      // 12. Pesanan terbaru (maks 20 dari berbagai status) untuk recentActivity
+      prisma.order.findMany({
+        take: 20,
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          orderNumber: true,
+          status: true,
+          createdAt: true,
+          user: { select: { name: true } },
+        },
+      }),
+      // 13. Pengajuan konsinyasi terbaru (maks 5) untuk recentActivity
+      prisma.artisanApplication.findMany({
+        take: 5,
+        orderBy: { submittedAt: "desc" },
+        select: {
+          id: true,
+          applicantName: true,
+          brandName: true,
+          status: true,
+          submittedAt: true,
+        },
+      }),
+      // 14. Ulasan terbaru (maks 5) untuk recentActivity
+      prisma.review.findMany({
+        take: 5,
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          rating: true,
+          createdAt: true,
+          product: { select: { name: true } },
+          user: { select: { name: true } },
+        },
+      }),
     ]);
 
     const revenue7Days = recentPaidOrders.reduce((sum, o) => sum + o.totalAmount, 0);
@@ -191,15 +235,149 @@ export const getDashboard = async (req: Request, res: Response, next: NextFuncti
       updatedAt: order.updatedAt,
     }));
 
-    // Reshape lowStockVariants ke { id, name, variantLabel, stock }
-    const lowStockProducts = lowStockVariants.map((v) => ({
+    // Urutkan varian stok menipis:
+    // 1. Stok terendah lebih dulu (0, 1, 2, dst.)
+    // 2. Jika stok sama, prioritaskan yang transaksi penjualannya paling baru (aktif laku hingga menipis)
+    // 3. Fallback ke total penjualan produk tertinggi
+    lowStockVariants.sort((a, b) => {
+      if (a.stock !== b.stock) {
+        return a.stock - b.stock;
+      }
+      const aLastSale = a.orderItems[0]?.order?.createdAt?.getTime() ?? 0;
+      const bLastSale = b.orderItems[0]?.order?.createdAt?.getTime() ?? 0;
+      if (aLastSale !== bLastSale) {
+        return bLastSale - aLastSale;
+      }
+      return b.product.soldCount - a.product.soldCount;
+    });
+
+    // Batasi maksimal 9 item agar membentuk grid 3x3 sempurna di frontend
+    const lowStockProducts = lowStockVariants.slice(0, 9).map((v) => ({
       id: v.product.id,
       name: v.product.name,
+      variantId: v.id,
       variantLabel: Array.isArray(v.combination) && v.combination.length > 0
         ? (v.combination as string[]).join(" / ")
         : "",
       stock: v.stock,
     }));
+
+    // Bentuk daftar aktivitas terbaru terpadu dengan variasi tipe (pesanan, pembayaran, selesai, pembatalan, pengajuan, ulasan, stok, pickup)
+    const pool: {
+      id: string;
+      type: "order_new" | "order_paid" | "order_completed" | "order_cancelled" | "application" | "review" | "low_stock" | "pickup";
+      text: string;
+      createdAt: string;
+      _date: Date;
+    }[] = [];
+
+    // 1. Ringkasan pickup hari ini (jika ada pesanan jadwal hari ini)
+    if (ordersToday > 0) {
+      pool.push({
+        id: "pickup-today",
+        type: "pickup",
+        text: `${ordersToday} pesanan dijadwalkan pickup hari ini`,
+        createdAt: nowWIB.toISOString(),
+        _date: nowWIB,
+      });
+    }
+
+    // 2. Pengajuan konsinyasi
+    for (const a of recentApplications) {
+      let text = `Pengajuan konsinyasi baru dari ${a.applicantName} (${a.brandName})`;
+      if (a.status === "diterima") {
+        text = `Pengajuan konsinyasi ${a.brandName} disetujui`;
+      } else if (a.status === "ditolak") {
+        text = `Pengajuan konsinyasi ${a.brandName} ditolak`;
+      }
+      pool.push({
+        id: `app-${a.id}`,
+        type: "application",
+        text,
+        createdAt: a.submittedAt.toISOString(),
+        _date: a.submittedAt,
+      });
+    }
+
+    // 3. Peringatan stok menipis (jika ada produk stok menipis)
+    if (lowStockVariants.length > 0) {
+      const v = lowStockVariants[0];
+      const label = Array.isArray(v.combination) && v.combination.length > 0
+        ? (v.combination as string[]).join(" / ")
+        : "";
+      const variantPart = label ? ` varian ${label}` : "";
+      pool.push({
+        id: `stock-${v.product.id}`,
+        type: "low_stock",
+        text: `Stok ${v.product.name}${variantPart} menipis (${v.stock} tersisa)`,
+        createdAt: new Date(nowWIB.getTime() - 2 * 3600 * 1000).toISOString(),
+        _date: new Date(nowWIB.getTime() - 2 * 3600 * 1000),
+      });
+    }
+
+    // 4. Ulasan pembeli
+    for (const r of recentReviews) {
+      const reviewer = r.user?.name || "Pembeli";
+      const targetName = r.product?.name ? `produk ${r.product.name}` : "toko";
+      pool.push({
+        id: `review-${r.id}`,
+        type: "review",
+        text: `Ulasan baru ${r.rating} bintang untuk ${targetName} oleh ${reviewer}`,
+        createdAt: r.createdAt.toISOString(),
+        _date: r.createdAt,
+      });
+    }
+
+    // 5. Pesanan dari berbagai status
+    for (const o of recentOrders) {
+      const buyer = o.user?.name || "Pembeli";
+      let type: "order_new" | "order_paid" | "order_completed" | "order_cancelled" = "order_new";
+      let text = `Pesanan baru #${o.orderNumber} dari ${buyer}`;
+
+      if (o.status === "lunas") {
+        type = "order_paid";
+        text = `Pesanan #${o.orderNumber} telah dibayar oleh ${buyer}`;
+      } else if (o.status === "selesai") {
+        type = "order_completed";
+        text = `Pesanan #${o.orderNumber} sudah diambil oleh ${buyer}`;
+      } else if (o.status === "dibatalkan" || o.status === "kedaluwarsa") {
+        type = "order_cancelled";
+        text = `Pesanan #${o.orderNumber} ${o.status === "kedaluwarsa" ? "kedaluwarsa" : "dibatalkan"} (${buyer})`;
+      }
+
+      pool.push({
+        id: `order-${o.id}`,
+        type,
+        text,
+        createdAt: o.createdAt.toISOString(),
+        _date: o.createdAt,
+      });
+    }
+
+    // Urutkan berdasarkan tanggal terbaru
+    pool.sort((a, b) => b._date.getTime() - a._date.getTime());
+
+    // Seleksi beragam: batasi 1 per tipe spesifik terlebih dahulu agar seluruh variasi ikon terwakili
+    const selected: typeof pool = [];
+    const typeCounts: Record<string, number> = {};
+
+    for (const it of pool) {
+      const c = typeCounts[it.type] || 0;
+      if (c < 1 && selected.length < 9) {
+        typeCounts[it.type] = c + 1;
+        selected.push(it);
+      }
+    }
+
+    // Lengkapi sampai 9 jika masih ada slot kosong
+    for (const it of pool) {
+      if (selected.length >= 9) break;
+      if (!selected.some((s) => s.id === it.id)) {
+        selected.push(it);
+      }
+    }
+
+    const recentActivity = selected.map(({ _date, ...item }) => item);
 
     res.json({
       ordersToday,
@@ -215,6 +393,7 @@ export const getDashboard = async (req: Request, res: Response, next: NextFuncti
       upcomingPickups,
       pendingRefundCount,
       pendingRefunds,
+      recentActivity,
     });
   } catch (err) {
     next(err);
@@ -823,7 +1002,7 @@ export const getSettings = async (req: Request, res: Response, next: NextFunctio
 // PUT /api/admin/settings — Update pengaturan sistem (AppSettings)
 export const updateSettings = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { holdDurationMinutes, autoCancelEnabled, pickupDeadlineDays, whatsappAdminNumber, notificationEmail, refundWindowDays, lowStockThreshold, defaultCreatorSharePercent } = req.body;
+    const { holdDurationMinutes, autoCancelEnabled, pickupDeadlineDays, whatsappAdminNumber, notificationEmail, refundWindowDays, lowStockThreshold, defaultCreatorSharePercent, contactEmail, aboutDescription, shopeeStoreUrl, tokopediaStoreUrl, tiktokshopStoreUrl } = req.body;
 
     // F-23: Validasi rentang angka
     let parsedHold: number | undefined = undefined;
@@ -868,6 +1047,34 @@ export const updateSettings = async (req: Request, res: Response, next: NextFunc
     if (lowStockThreshold !== undefined && (!Number.isInteger(lowStockThreshold) || lowStockThreshold < 1 || lowStockThreshold > 100)) return res.status(400).json({ error: "lowStockThreshold harus berupa bilangan bulat 1 sampai 100" });
     if (defaultCreatorSharePercent !== undefined && (typeof defaultCreatorSharePercent !== "number" || !Number.isFinite(defaultCreatorSharePercent) || defaultCreatorSharePercent < 0 || defaultCreatorSharePercent > 100 || !/^\d+(\.\d{1,2})?$/.test(String(defaultCreatorSharePercent)))) return res.status(400).json({ error: "defaultCreatorSharePercent harus berupa angka 0 sampai 100 dengan maksimal 2 desimal" });
 
+    // Kontak publik + Tentang Kami + link toko olshop (kosong/null = hapus)
+    const isBlank = (v: unknown) => v === null || (typeof v === "string" && v.trim() === "");
+    const extraSettings: Record<string, any> = {};
+    if (contactEmail !== undefined) {
+      if (isBlank(contactEmail)) {
+        extraSettings.contactEmail = null;
+      } else if (typeof contactEmail !== "string" || contactEmail.trim().length > 191 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail.trim())) {
+        return res.status(400).json({ error: "contactEmail harus berupa email valid maksimal 191 karakter atau kosong" });
+      } else {
+        extraSettings.contactEmail = contactEmail.trim();
+      }
+    }
+    if (aboutDescription !== undefined) {
+      if (isBlank(aboutDescription)) {
+        extraSettings.aboutDescription = null;
+      } else if (typeof aboutDescription !== "string") {
+        return res.status(400).json({ error: "aboutDescription harus berupa teks" });
+      } else {
+        const cleaned = aboutDescription.replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+        if (cleaned.length > 3000) return res.status(400).json({ error: "aboutDescription maksimal 3000 karakter" });
+        extraSettings.aboutDescription = cleaned;
+      }
+    }
+    for (const [platform, value] of [["shopee", shopeeStoreUrl], ["tokopedia", tokopediaStoreUrl], ["tiktokshop", tiktokshopStoreUrl]] as const) {
+      if (value === undefined) continue;
+      extraSettings[`${platform}StoreUrl`] = isBlank(value) ? null : await validateOlshopUrl(platform, value);
+    }
+
     const settings = await prisma.appSettings.upsert({
       where: { id: 1 },
       create: {
@@ -880,6 +1087,7 @@ export const updateSettings = async (req: Request, res: Response, next: NextFunc
         ...(parsedRefundWindow !== undefined && { refundWindowDays: parsedRefundWindow }),
         ...(lowStockThreshold !== undefined && { lowStockThreshold }),
         ...(defaultCreatorSharePercent !== undefined && { defaultCreatorSharePercent }),
+        ...extraSettings,
       },
       update: {
         ...(parsedHold !== undefined && { holdDurationMinutes: parsedHold }),
@@ -890,9 +1098,11 @@ export const updateSettings = async (req: Request, res: Response, next: NextFunc
         ...(parsedRefundWindow !== undefined && { refundWindowDays: parsedRefundWindow }),
         ...(lowStockThreshold !== undefined && { lowStockThreshold }),
         ...(defaultCreatorSharePercent !== undefined && { defaultCreatorSharePercent }),
+        ...extraSettings,
       },
     });
 
+    clearStoreOlshopCache();
     res.json({ message: "Pengaturan sistem berhasil diperbarui", settings: { ...settings, defaultCreatorSharePercent: Number(settings.defaultCreatorSharePercent) } });
   } catch (err) {
     next(err);

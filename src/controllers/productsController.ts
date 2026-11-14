@@ -13,6 +13,7 @@ import { validateImageVariants, normalizeImageOrder, pruneImageVariants } from "
 import { presentArtisan } from "../lib/presentArtisan";
 import { serializeProductStatus } from "../lib/productStatus";
 import { assertCleanFields } from "../lib/contentFilter";
+import { buildOlshopData, getStoreOlshopUrls, presentOlshop, StoreOlshopUrls } from "../lib/olshop";
 
 // Helper untuk membuat slug sederhana dari nama produk
 function createSlug(name: string): string {
@@ -31,10 +32,16 @@ function validateProductImages(images: unknown): string[] | null {
 }
 
 /** Normalisasi respons produk: imageVariants selalu array (null → []); artisan dengan foto efektif. */
-function serializeProduct(product: any): any {
+function serializeProduct(product: any, store?: StoreOlshopUrls): any {
   if (!product) return product;
   const artisan = product.artisan ? presentArtisan(product.artisan) : product.artisan;
-  return serializeProductStatus({ ...product, artisan, imageVariants: Array.isArray(product.imageVariants) ? product.imageVariants : [] });
+  return serializeProductStatus({
+    ...product,
+    artisan,
+    imageVariants: Array.isArray(product.imageVariants) ? product.imageVariants : [],
+    // olshop = pengaturan mentah per platform (untuk form edit); olshopLinks = link siap tampil di mobile
+    ...presentOlshop(product, store),
+  });
 }
 
 /** Include artisan dengan user.avatarUrl untuk query produk (dipakai di semua findMany/findUnique yang perlu foto efektif). */
@@ -77,8 +84,8 @@ export const listProducts = async (req: Request, res: Response, next: NextFuncti
         return res.json({ products: [] });
       }
       where.categoryId = foundCategory.id;
-    } else if (typeof categoryId === "string") {
-      where.categoryId = categoryId;
+    } else if (typeof categoryId === "string" && categoryId.trim()) {
+      where.categoryId = categoryId.trim();
     }
 
     if (typeof search === "string" && search.trim()) {
@@ -143,6 +150,7 @@ export const listProducts = async (req: Request, res: Response, next: NextFuncti
     // Lampirkan effectiveStock ke tiap varian + rating info
     const allVariants = products.flatMap((product) => product.variants);
     const allVariantsWithStock = await attachEffectiveStockToVariants(allVariants);
+    const store = await getStoreOlshopUrls();
     // 1e: ganti filter+some O(n²) dengan Map berdasarkan variantId
     const variantStockMap = new Map(allVariantsWithStock.map((v) => [v.id, v]));
     const variantsByProduct = new Map<string, typeof allVariantsWithStock>();
@@ -151,7 +159,7 @@ export const listProducts = async (req: Request, res: Response, next: NextFuncti
     }
     const productsWithStock = products.map((p) => {
       const stats = ratingMap[p.id] || { avgRating: 0, reviewCount: 0 };
-      return serializeProduct({ ...p, avgRating: stats.avgRating, reviewCount: stats.reviewCount, variants: variantsByProduct.get(p.id) || [] });
+      return serializeProduct({ ...p, avgRating: stats.avgRating, reviewCount: stats.reviewCount, variants: variantsByProduct.get(p.id) || [] }, store);
     });
 
     const responseData: any = { products: productsWithStock };
@@ -183,9 +191,11 @@ export const getProductById = async (req: Request, res: Response, next: NextFunc
         variantOptions: true,
         variants: true,
         story: true,
-        // F-14: Select aman — jangan bocorkan data order ke publik
+        // F-14: Select aman — jangan bocorkan data order ke publik (hanya 3 ulasan terbaru)
         reviews: {
           where: { status: "tampil" },
+          take: 3,
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
           select: {
             id: true,
             rating: true,
@@ -209,11 +219,30 @@ export const getProductById = async (req: Request, res: Response, next: NextFunc
     }
 
     const variantsWithStock = await attachEffectiveStockToVariants(product.variants);
+    const store = await getStoreOlshopUrls();
 
-    // A3: Hitung avgRating dan reviewCount dari ulasan yang berstatus tampil
-    const totalReviews = product.reviews.length;
-    const avgRating = totalReviews > 0
-      ? Number((product.reviews.reduce((sum, r) => sum + r.rating, 0) / totalReviews).toFixed(1))
+    // A3: Hitung avgRating, reviewCount, dan breakdown dari seluruh ulasan yang berstatus tampil
+    const [totalReviews, aggregateRating, ratingGroups] = await Promise.all([
+      prisma.review.count({ where: { productId: id, status: "tampil" } }),
+      prisma.review.aggregate({
+        where: { productId: id, status: "tampil" },
+        _avg: { rating: true },
+      }),
+      prisma.review.groupBy({
+        by: ["rating"],
+        where: { productId: id, status: "tampil" },
+        _count: { rating: true },
+      }),
+    ]);
+
+    const breakdown: Record<string, number> = { "1": 0, "2": 0, "3": 0, "4": 0, "5": 0 };
+    for (const g of ratingGroups) {
+      if (g.rating >= 1 && g.rating <= 5) {
+        breakdown[String(g.rating)] = g._count.rating;
+      }
+    }
+    const avgRating = aggregateRating._avg.rating
+      ? Number(aggregateRating._avg.rating.toFixed(1))
       : 0;
 
     res.json({
@@ -221,8 +250,128 @@ export const getProductById = async (req: Request, res: Response, next: NextFunc
         ...product,
         avgRating,
         reviewCount: totalReviews,
+        breakdown,
+        ratingBreakdown: breakdown,
         variants: variantsWithStock,
+      }, store),
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// GET /api/products/:id/reviews — list ulasan produk (dukung filter rating, page, limit)
+export const getProductReviews = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const { rating, page, limit } = req.query;
+
+    // 1. Validasi keberadaan & visibilitas publik produk
+    const product = await prisma.product.findFirst({
+      where: { id, isActive: true, approvalStatus: "disetujui" },
+      include: { artisan: { select: { status: true } } },
+    });
+
+    if (!product || product.artisan.status !== "aktif") {
+      throw new HttpError(404, "Produk tidak ditemukan atau tidak aktif", "NOT_FOUND");
+    }
+
+    // 2. Validasi query params
+    let parsedRating: number | undefined;
+    if (rating !== undefined) {
+      if (typeof rating !== "string" || !/^\d+$/.test(rating)) {
+        throw new HttpError(400, "rating harus berupa bilangan bulat antara 1 sampai 5", "VALIDATION_ERROR");
+      }
+      parsedRating = parseInt(rating, 10);
+      if (parsedRating < 1 || parsedRating > 5) {
+        throw new HttpError(400, "rating harus berupa bilangan bulat antara 1 sampai 5", "VALIDATION_ERROR");
+      }
+    }
+
+    let parsedPage = 1;
+    if (page !== undefined) {
+      if (typeof page !== "string" || !/^\d+$/.test(page)) {
+        throw new HttpError(400, "page harus berupa bilangan bulat minimal 1", "VALIDATION_ERROR");
+      }
+      parsedPage = parseInt(page, 10);
+      if (parsedPage < 1) {
+        throw new HttpError(400, "page harus berupa bilangan bulat minimal 1", "VALIDATION_ERROR");
+      }
+    }
+
+    let parsedLimit = 10;
+    if (limit !== undefined) {
+      if (typeof limit !== "string" || !/^\d+$/.test(limit)) {
+        throw new HttpError(400, "limit harus berupa bilangan bulat antara 1 sampai 50", "VALIDATION_ERROR");
+      }
+      parsedLimit = parseInt(limit, 10);
+      if (parsedLimit < 1 || parsedLimit > 50) {
+        throw new HttpError(400, "limit harus berupa bilangan bulat antara 1 sampai 50", "VALIDATION_ERROR");
+      }
+    }
+
+    // 3. Ringkasan ulasan (selalu menghitung seluruh ulasan yang berstatus tampil tanpa terpengaruh filter rating)
+    const [totalVisible, aggregateRating, ratingGroups] = await Promise.all([
+      prisma.review.count({ where: { productId: id, status: "tampil" } }),
+      prisma.review.aggregate({
+        where: { productId: id, status: "tampil" },
+        _avg: { rating: true },
       }),
+      prisma.review.groupBy({
+        by: ["rating"],
+        where: { productId: id, status: "tampil" },
+        _count: { rating: true },
+      }),
+    ]);
+
+    const breakdown: Record<string, number> = { "1": 0, "2": 0, "3": 0, "4": 0, "5": 0 };
+    for (const g of ratingGroups) {
+      if (g.rating >= 1 && g.rating <= 5) {
+        breakdown[String(g.rating)] = g._count.rating;
+      }
+    }
+    const avgRating = aggregateRating._avg.rating
+      ? Number(aggregateRating._avg.rating.toFixed(1))
+      : 0;
+
+    // 4. Daftar ulasan sesuai filter rating & paginasi
+    const filterWhere: { productId: string; status: "tampil"; rating?: number } = {
+      productId: id,
+      status: "tampil",
+      ...(parsedRating !== undefined ? { rating: parsedRating } : {}),
+    };
+
+    const filteredTotal = await prisma.review.count({ where: filterWhere });
+    const totalPages = Math.ceil(filteredTotal / parsedLimit);
+
+    const reviews = await prisma.review.findMany({
+      where: filterWhere,
+      select: {
+        id: true,
+        productId: true,
+        rating: true,
+        comment: true,
+        createdAt: true,
+        user: { select: { id: true, name: true, avatarUrl: true } },
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      skip: (parsedPage - 1) * parsedLimit,
+      take: parsedLimit,
+    });
+
+    res.json({
+      reviews,
+      pagination: {
+        page: parsedPage,
+        limit: parsedLimit,
+        total: filteredTotal,
+        totalPages,
+      },
+      summary: {
+        avgRating,
+        reviewCount: totalVisible,
+        breakdown,
+      },
     });
   } catch (err) {
     next(err);
@@ -244,7 +393,6 @@ export const createProduct = async (req: Request, res: Response, next: NextFunct
       price,
       images,
       isLimited,
-      shopeeUrl,
       variantOptions, // array of { name: "Motif", values: ["Ubin", "Sulur"] }
       variantStocks,  // opsional: array of { combination: ["Ubin"], stock: 10 }
       replacesProductId,
@@ -286,9 +434,8 @@ export const createProduct = async (req: Request, res: Response, next: NextFunct
       assertCleanFields({ "Nama produk": name, "Deskripsi produk": description, "Deskripsi singkat": shortDescription });
       if (Array.isArray(variantOptions)) for (const option of variantOptions) assertCleanFields({ "Nama opsi varian": option?.name, "Nilai opsi varian": Array.isArray(option?.values) ? option.values.join(" ") : option?.values });
     }
-    if (shopeeUrl !== undefined && shopeeUrl !== null && !isHttpsUrl(shopeeUrl)) {
-      return res.status(400).json({ error: "shopeeUrl harus berupa URL HTTPS" });
-    }
+    // Link olshop (Shopee/Tokopedia/TikTok Shop): mode + URL divalidasi ketat di lib/olshop.ts
+    const olshopData = await buildOlshopData(req.body, await getStoreOlshopUrls());
     if (!Array.isArray(variantOptions) && variantOptions !== undefined) {
       return res.status(400).json({ error: "variantOptions harus berupa array" });
     }
@@ -385,7 +532,7 @@ export const createProduct = async (req: Request, res: Response, next: NextFunct
           images: normalizedImages,
           imageVariants: cleanImageVariants.length > 0 ? (cleanImageVariants as any) : undefined,
           isLimited: isLimited === true,
-          shopeeUrl,
+          ...olshopData,
         },
       });
 
@@ -460,7 +607,7 @@ export const createProduct = async (req: Request, res: Response, next: NextFunct
       });
     });
 
-    res.status(201).json({ product: serializeProduct(newProduct) });
+    res.status(201).json({ product: serializeProduct(newProduct, await getStoreOlshopUrls()) });
   } catch (err: any) {
     // HttpError diteruskan ke error handler global agar field `code` ikut terkirim
     if (err instanceof HttpError) {
@@ -495,7 +642,6 @@ export const updateProduct = async (req: Request, res: Response, next: NextFunct
       images,
       imageVariants: rawImageVariants,
       isLimited,
-      shopeeUrl,
       variantStocks, // array of { id: "variantId", stock: 15 }
     } = req.body;
 
@@ -531,9 +677,8 @@ export const updateProduct = async (req: Request, res: Response, next: NextFunct
     if (isLimited !== undefined && typeof isLimited !== "boolean") {
       return res.status(400).json({ error: "isLimited harus berupa boolean" });
     }
-    if (shopeeUrl !== undefined && shopeeUrl !== null && !isHttpsUrl(shopeeUrl)) {
-      return res.status(400).json({ error: "shopeeUrl harus berupa URL HTTPS" });
-    }
+    // Link olshop (Shopee/Tokopedia/TikTok Shop): mode + URL divalidasi ketat di lib/olshop.ts
+    const olshopData = await buildOlshopData(req.body, await getStoreOlshopUrls());
 
     // Baca images + imageVariants lama sebelum update (untuk cleanup R3, R6)
     let oldImages: unknown = undefined;
@@ -590,7 +735,7 @@ export const updateProduct = async (req: Request, res: Response, next: NextFunct
           ...(normalizedImages !== undefined && { images: normalizedImages }),
           ...(finalImageVariants !== undefined && { imageVariants: finalImageVariants.length > 0 ? (finalImageVariants as any) : null }),
           ...(isLimited !== undefined && { isLimited }),
-          ...(shopeeUrl !== undefined && { shopeeUrl }),
+          ...olshopData,
         },
       });
 
@@ -627,7 +772,7 @@ export const updateProduct = async (req: Request, res: Response, next: NextFunct
       if (toRelease.length > 0) releaseUrls(toRelease).catch(() => {});
     }
 
-    res.json({ product: serializeProduct(updated) });
+    res.json({ product: serializeProduct(updated, await getStoreOlshopUrls()) });
   } catch (err) {
     next(err);
   }
@@ -765,10 +910,11 @@ export const listMyProducts = async (req: Request, res: Response, next: NextFunc
 
     const allVariants = products.flatMap((product) => product.variants);
     const allVariantsWithStock = await attachEffectiveStockToVariants(allVariants);
+    const store = await getStoreOlshopUrls();
     const productsWithStock = products.map((p) => {
       const stats = ratingMap[p.id] || { avgRating: 0, reviewCount: 0 };
       const variants = allVariantsWithStock.filter((variant) => p.variants.some((item) => item.id === variant.id));
-      return serializeProduct({ ...p, avgRating: stats.avgRating, reviewCount: stats.reviewCount, variants, replacedByProductId: null });
+      return serializeProduct({ ...p, avgRating: stats.avgRating, reviewCount: stats.reviewCount, variants, replacedByProductId: null }, store);
     });
 
     const replacements = products.length === 0 ? [] : await prisma.product.findMany({
@@ -787,6 +933,7 @@ export const listMyProducts = async (req: Request, res: Response, next: NextFunc
 export default {
   listProducts,
   getProductById,
+  getProductReviews,
   listMyProducts,
   createProduct,
   updateProduct,
