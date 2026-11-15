@@ -52,6 +52,11 @@ ok("entri[0].url === IMG[0]",          valid[0].url === IMG[0]);
 ok("entri[0].option === 'Motif'",      valid[0].option === "Motif");
 ok("entri[0].value === 'Ubin'",        valid[0].value === "Ubin");
 
+const comboValid = validateImageVariants([
+  { url: IMG[2], combination: [{ option: "Motif", value: "Ubin" }, { option: "Warna", value: "Merah" }] },
+], IMG, OPTS);
+ok("kombinasi beberapa opsi valid", comboValid[0].combination?.length === 2);
+
 // Aturan 1: bukan array
 throws400("bukan array → 400",         () => validateImageVariants("string", IMG, OPTS));
 

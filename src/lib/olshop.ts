@@ -140,6 +140,15 @@ export async function validateOlshopUrl(platform: OlshopPlatform, raw: unknown):
   let url = checkUrlShape(platform, raw);
   const original = url.toString();
 
+  // TikTok's official share links are intentionally opaque and may reject
+  // server-side fetching or change their redirect behavior. The original URL
+  // is already HTTPS and on an approved TikTok host, so keep it as-is instead
+  // of turning a valid share link into a false validation error.
+  if (platform === "tiktokshop" && (url.hostname.toLowerCase() === "vt.tiktok.com" || url.hostname.toLowerCase() === "vm.tiktok.com")) {
+    await assertPublicHost(platform, url.hostname.toLowerCase());
+    return original;
+  }
+
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     if (!isShortHost(url.hostname.toLowerCase())) {
       const finalUrl = url.toString();
@@ -163,7 +172,14 @@ export async function validateOlshopUrl(platform: OlshopPlatform, raw: unknown):
       throw invalid(platform, "link pendek tidak mengarah ke halaman marketplace, gunakan link lengkap");
     }
     try {
-      current = new URL(location, url).toString();
+      const redirected = new URL(location, url);
+      // Be tolerant of marketplace shorteners that emit an HTTP redirect while
+      // keeping the destination restricted to the same official platform
+      // domains. The stored/final link remains HTTPS.
+      if (redirected.protocol === "http:" && hostMatches(redirected.hostname.toLowerCase(), ALLOWED_ROOTS[platform])) {
+        redirected.protocol = "https:";
+      }
+      current = redirected.toString();
     } catch {
       throw invalid(platform, "tujuan link pendek tidak valid");
     }

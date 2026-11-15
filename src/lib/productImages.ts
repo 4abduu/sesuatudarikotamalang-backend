@@ -6,8 +6,10 @@
 
 export interface ImageVariantEntry {
   url: string;
-  option: string;
-  value: string;
+  combination?: Array<{ option: string; value: string }>;
+  /** Format lama, tetap diterima agar data/klien existing kompatibel. */
+  option?: string;
+  value?: string;
 }
 
 export interface VariantOption {
@@ -49,13 +51,12 @@ export function validateImageVariants(
 
   for (const item of imageVariants) {
     if (!item || typeof item !== "object") {
-      throw Object.assign(new Error("Setiap entri imageVariants harus berupa objek { url, option, value }"), { status: 400 });
+      throw Object.assign(new Error("Setiap entri imageVariants harus berupa objek foto dan kombinasi varian"), { status: 400 });
     }
-    const { url, option, value } = item as any;
+    const { url, option, value, combination } = item as any;
 
-    // Aturan 1: tipe string
-    if (typeof url !== "string" || typeof option !== "string" || typeof value !== "string") {
-      throw Object.assign(new Error("Setiap entri imageVariants harus memiliki url, option, dan value berupa string"), { status: 400 });
+    if (typeof url !== "string") {
+      throw Object.assign(new Error("Setiap entri imageVariants harus memiliki url berupa string"), { status: 400 });
     }
 
     // Aturan 1: url unik
@@ -69,18 +70,39 @@ export function validateImageVariants(
       throw Object.assign(new Error(`URL foto "${url}" tidak ada di daftar images produk`), { status: 400 });
     }
 
-    // Aturan 2: option harus nama opsi varian yang valid
-    const validValues = optionMap.get(option);
-    if (!validValues) {
-      throw Object.assign(new Error(`Opsi varian "${option}" tidak ditemukan pada produk ini`), { status: 400 });
+    const isLegacyLink = !Array.isArray(combination);
+    const rawCombination = Array.isArray(combination)
+      ? combination
+      : typeof option === "string" && typeof value === "string"
+        ? [{ option, value }]
+        : null;
+    if (!rawCombination || rawCombination.length === 0) {
+      throw Object.assign(new Error("Setiap foto tertaut harus memiliki kombinasi varian"), { status: 400 });
     }
 
-    // Aturan 2: value harus salah satu nilai opsi tersebut
-    if (!validValues.has(value)) {
-      throw Object.assign(new Error(`Nilai "${value}" tidak valid untuk opsi varian "${option}"`), { status: 400 });
+    const seenOptions = new Set<string>();
+    const cleanCombination: Array<{ option: string; value: string }> = [];
+    for (const part of rawCombination) {
+      if (!part || typeof part.option !== "string" || typeof part.value !== "string") {
+        throw Object.assign(new Error("Kombinasi varian foto harus memiliki option dan value berupa string"), { status: 400 });
+      }
+      if (seenOptions.has(part.option)) {
+        throw Object.assign(new Error(`Opsi varian "${part.option}" tidak boleh diulang pada satu foto`), { status: 400 });
+      }
+      seenOptions.add(part.option);
+      const validValues = optionMap.get(part.option);
+      if (!validValues) {
+        throw Object.assign(new Error(`Opsi varian "${part.option}" tidak ditemukan pada produk ini`), { status: 400 });
+      }
+      if (!validValues.has(part.value)) {
+        throw Object.assign(new Error(`Nilai "${part.value}" tidak valid untuk opsi varian "${part.option}"`), { status: 400 });
+      }
+      cleanCombination.push({ option: part.option, value: part.value });
     }
 
-    result.push({ url, option, value });
+    result.push(isLegacyLink
+      ? { url, option: cleanCombination[0].option, value: cleanCombination[0].value }
+      : { url, combination: cleanCombination });
   }
 
   return result;

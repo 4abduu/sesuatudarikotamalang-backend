@@ -6,6 +6,8 @@ import { isHttpsUrl, isString } from "../lib/validate";
 import { normalizeBrandName, normalizeBrandKey, BRAND_KEY_MIN } from "../lib/brandKey";
 import { HttpError } from "../lib/httpError";
 import { assertCleanFields } from "../lib/contentFilter";
+import { assertAllowedCatalogFields } from "../lib/catalogPolicy";
+import { assertUploadedFileUrls } from "./uploadedFiles";
 
 export function getMyApplications(user: AuthUser) {
   return prisma.artisanApplication.findMany({ where: { userId: user.id }, orderBy: { submittedAt: "desc" }, include: { category: true } });
@@ -62,6 +64,7 @@ export async function updateMyArtisanProfile(user: AuthUser, input: { brandName?
   if (artisan.status !== "aktif") throw forbidden("Akun kreator nonaktif");
 
   const { brandName, bio, avatarUrl } = input;
+  assertAllowedCatalogFields({ "Nama toko": brandName, "Bio kreator": bio });
   assertCleanFields({ "Nama toko": brandName, "Bio kreator": bio });
 
   // ── brandName (2.1 dan 2.2) ──────────────────────────────────────────────
@@ -179,6 +182,7 @@ export async function createApplicationForUser(user: AuthUser, input: {
     throw badRequest("Data pengajuan konsinyasi tidak valid");
   }
   assertCleanFields({ "Nama pemohon": input.applicantName, "Nama toko": input.brandName, "Deskripsi pengajuan": input.description });
+  assertAllowedCatalogFields({ "Nama toko": input.brandName, "Deskripsi pengajuan": input.description });
   if (input.categoryId !== undefined && (typeof input.categoryId !== "string" || !(await prisma.category.findUnique({ where: { id: input.categoryId } })))) {
     throw notFound("Kategori tidak ditemukan");
   }
@@ -188,6 +192,11 @@ export async function createApplicationForUser(user: AuthUser, input: {
   if (input.sampleFileUrl !== undefined && input.sampleFileUrl !== null && !isHttpsUrl(input.sampleFileUrl)) {
     throw badRequest("sampleFileUrl harus berupa URL HTTPS");
   }
+  const sampleUrls = [
+    ...(Array.isArray(input.samplePhotos) ? input.samplePhotos : []),
+    ...(typeof input.sampleFileUrl === "string" ? [input.sampleFileUrl] : []),
+  ];
+  await assertUploadedFileUrls(user, sampleUrls, "Foto sampel");
   const existingPending = await prisma.artisanApplication.findFirst({ where: { userId: user.id, status: "pending" } });
   if (existingPending) throw badRequest("Kamu masih memiliki pengajuan konsinyasi yang sedang diproses (pending)");
 
