@@ -9,6 +9,29 @@ import { HttpError } from "../lib/httpError";
 
 type UserPayload = { id: string; role: string };
 
+/**
+ * Pastikan semua URL foto yang akan dipasang ke record berasal dari endpoint
+ * upload dan boleh dipakai oleh user yang sedang melakukan perubahan.
+ */
+export async function assertUploadedFileUrls(user: UserPayload, urls: string[], fieldLabel: string): Promise<void> {
+  const uniqueUrls = [...new Set(urls.map((url) => url.trim()))];
+  if (uniqueUrls.length === 0) return;
+
+  const rows = await prisma.uploadedFile.findMany({
+    where: { url: { in: uniqueUrls } },
+    select: { url: true, uploadedById: true },
+  });
+  const permitted = new Set(
+    rows
+      .filter((row) => user.role === "admin" || row.uploadedById === user.id)
+      .map((row) => row.url.trim())
+  );
+  const missing = uniqueUrls.some((url) => !permitted.has(url));
+  if (missing) {
+    throw new HttpError(400, `${fieldLabel} harus berasal dari endpoint upload yang tervalidasi`, "UPLOAD_REQUIRED");
+  }
+}
+
 // ---------------------------------------------------------------------------
 // GET /api/upload/mine — daftar unggahan milik user (maks 100 terbaru)
 // ---------------------------------------------------------------------------

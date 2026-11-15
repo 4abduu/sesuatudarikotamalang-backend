@@ -13,7 +13,9 @@ import { validateImageVariants, normalizeImageOrder, pruneImageVariants } from "
 import { presentArtisan } from "../lib/presentArtisan";
 import { serializeProductStatus } from "../lib/productStatus";
 import { assertCleanFields } from "../lib/contentFilter";
+import { assertAllowedCatalogFields } from "../lib/catalogPolicy";
 import { buildOlshopData, getStoreOlshopUrls, presentOlshop, StoreOlshopUrls } from "../lib/olshop";
+import { assertUploadedFileUrls } from "../dal/uploadedFiles";
 
 // Helper untuk membuat slug sederhana dari nama produk
 function createSlug(name: string): string {
@@ -430,6 +432,15 @@ export const createProduct = async (req: Request, res: Response, next: NextFunct
     if (parsedImages.length > 10) {
       return res.status(400).json({ error: "Foto produk maksimal 10" });
     }
+    await assertUploadedFileUrls(req.user, parsedImages, "Foto produk");
+    assertAllowedCatalogFields({
+      "Nama produk": name,
+      "Deskripsi produk": description,
+      "Deskripsi singkat": shortDescription,
+      "Opsi varian": Array.isArray(variantOptions)
+        ? variantOptions.flatMap((option) => [option?.name, ...(Array.isArray(option?.values) ? option.values : [])]).join(" ")
+        : undefined,
+    });
     if (req.user.role === "creator") {
       assertCleanFields({ "Nama produk": name, "Deskripsi produk": description, "Deskripsi singkat": shortDescription });
       if (Array.isArray(variantOptions)) for (const option of variantOptions) assertCleanFields({ "Nama opsi varian": option?.name, "Nilai opsi varian": Array.isArray(option?.values) ? option.values.join(" ") : option?.values });
@@ -643,7 +654,12 @@ export const updateProduct = async (req: Request, res: Response, next: NextFunct
       imageVariants: rawImageVariants,
       isLimited,
       variantStocks, // array of { id: "variantId", stock: 15 }
+      variantOptions,
     } = req.body;
+
+    if (variantOptions !== undefined) {
+      throw new HttpError(400, "Struktur varian produk dikunci setelah produk dibuat; ubah stok per kombinasi saja", "VARIANT_STRUCTURE_LOCKED");
+    }
 
     if (price !== undefined) {
       const parsedPrice = typeof price === "number" && Number.isInteger(price)
@@ -663,6 +679,7 @@ export const updateProduct = async (req: Request, res: Response, next: NextFunct
     if (description !== undefined && !isString(description)) {
       return res.status(400).json({ error: "description harus berupa teks" });
     }
+    assertAllowedCatalogFields({ "Nama produk": name, "Deskripsi produk": description, "Deskripsi singkat": shortDescription });
     if (req.user.role === "creator") assertCleanFields({ "Nama produk": name, "Deskripsi produk": description, "Deskripsi singkat": shortDescription });
     if (categoryId !== undefined) {
       if (typeof categoryId !== "string" || !categoryId) {
@@ -720,6 +737,7 @@ export const updateProduct = async (req: Request, res: Response, next: NextFunct
     const normalizedImages = finalImages !== undefined
       ? normalizeImageOrder(finalImages, finalImageVariants ?? currentImageVariants)
       : undefined;
+    if (finalImages !== undefined) await assertUploadedFileUrls(req.user, finalImages, "Foto produk");
 
     const updated = await prisma.$transaction(async (tx) => {
       // Update data produk dasar
@@ -808,6 +826,7 @@ export const upsertStory = async (req: Request, res: Response, next: NextFunctio
 
     const { id } = req.params;
     const { title, content, process, coverImageUrl, processImages } = req.body;
+    assertAllowedCatalogFields({ "Judul cerita": title, "Isi cerita": content, "Proses cerita": process });
     if (req.user.role === "creator") assertCleanFields({ "Judul cerita": title, "Isi cerita": content, "Proses cerita": process });
 
     if (!isString(title, { max: 191 }) || !title.trim() || !isString(content, { max: 10000 }) || !content.trim()) {
@@ -822,6 +841,11 @@ export const upsertStory = async (req: Request, res: Response, next: NextFunctio
     if (processImages !== undefined && (!Array.isArray(processImages) || processImages.length > 10 || processImages.some((image) => !isHttpsUrl(image)))) {
       return res.status(400).json({ error: "processImages harus berupa maksimal 10 URL HTTPS" });
     }
+    const storyImageUrls = [
+      ...(typeof coverImageUrl === "string" ? [coverImageUrl] : []),
+      ...(Array.isArray(processImages) ? processImages : []),
+    ];
+    await assertUploadedFileUrls(req.user, storyImageUrls, "Foto cerita");
 
     await getEditableProduct(req.user, id);
 

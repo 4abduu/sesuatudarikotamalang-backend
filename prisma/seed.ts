@@ -165,6 +165,10 @@ function creatorSpecs(demoCreatorEmail: string): CreatorSpec[] {
   ];
 }
 
+type ImageVariantSpec =
+  | [photoKey: string, option: string, value: string]
+  | [photoKey: string, combination: Array<[option: string, value: string]>];
+
 interface ProductSpec {
   key: string;
   seller: string; // key kreator atau "official"
@@ -187,7 +191,7 @@ interface ProductSpec {
   noSales?: boolean;
   oldSale?: number; // satu penjualan lama (hari lalu) untuk produk slow mover
   options?: Array<{ name: string; values: string[] }>;
-  imageVariants?: Array<[string, string, string]>; // [fotoKey, opsi, nilai]
+  imageVariants?: ImageVariantSpec[]; // format lama atau [fotoKey, [[opsi, nilai], ...]]
 }
 
 const PRODUCTS: ProductSpec[] = [
@@ -209,7 +213,7 @@ const PRODUCTS: ProductSpec[] = [
   { key: "cangkir-keramik-dinoyo", seller: "bagas", cat: "keramik", name: "Cangkir Keramik Gerabah Dinoyo", price: 45000, short: "Cangkir glasir khas Dinoyo.", desc: "Cangkir tanah liat bakar khas kampung keramik Dinoyo dengan glasir antik pilihan warna.", photos: ["ceramic"], added: 135, stock: [8, 0], w: 6, q: 4.6, options: [{ name: "Warna", values: ["Hijau Botol", "Cokelat Tanah"] }], imageVariants: [["ceramic", "Warna", "Hijau Botol"], ["craft", "Warna", "Cokelat Tanah"]] },
   /* --- Rara Sablon --- */
   { key: "kaos-kerawang-malang-tempo-dulu", seller: "rara", cat: "apparel", name: "Kaos Kerawang Malang Tempo Dulu", price: 135000, short: "Kaos sablon manual motif rumah kuno.", desc: "Kaos katun combed dengan sablon manual motif ventilasi kerawang rumah kuno Klojen.", photos: ["textile", "bag"], added: 148, stock: [0, 7, 5, 0], w: 6, q: 4.7, options: [{ name: "Ukuran", values: ["S", "M", "L", "XL"] }], imageVariants: [["textile", "Ukuran", "M"], ["bag", "Ukuran", "L"]] },
-  { key: "kaos-ornamen-ubin-tegel", seller: "rara", cat: "apparel", name: "Kaos Sablon Motif Ubin Tegel", price: 125000, short: "Kaos motif ubin tegel tempo dulu.", desc: "Kaos katun dengan sablon motif ubin tegel rumah lama, tersedia dua warna dan tiga ukuran.", photos: ["textile"], added: 90, stock: [0, 6, 0, 3, 2, 0], w: 4, q: 4.1, options: [{ name: "Ukuran", values: ["M", "L", "XL"] }, { name: "Warna", values: ["Krem", "Hitam"] }] },
+  { key: "kaos-ornamen-ubin-tegel", seller: "rara", cat: "apparel", name: "Kaos Sablon Motif Ubin Tegel", price: 125000, short: "Kaos motif ubin tegel tempo dulu.", desc: "Kaos katun dengan sablon motif ubin tegel rumah lama, tersedia dua warna dan tiga ukuran.", photos: ["textile", "bag"], added: 90, stock: [0, 6, 0, 3, 2, 0], w: 4, q: 4.1, options: [{ name: "Ukuran", values: ["M", "L", "XL"] }, { name: "Warna", values: ["Krem", "Hitam"] }], imageVariants: [["textile", [["Ukuran", "M"], ["Warna", "Krem"]]], ["bag", [["Ukuran", "L"], ["Warna", "Hitam"]]]] },
   { key: "tote-bag-kanvas-singosari", seller: "rara", cat: "tote-bag", name: "Tote Bag Kanvas Sablon Candi Singosari", price: 65000, short: "Tote bag kanvas tebal sablon Dwarapala.", desc: "Tote bag kanvas tebal dengan ritsleting dan sablon siluet arca Dwarapala Singosari.", photos: ["bag", "textile"], added: 140, stock: 12, w: 6, q: 4.6 },
   { key: "tote-bag-motif-trem", seller: "rara", cat: "tote-bag", name: "Tote Bag Motif Trem Antik", price: 70000, short: "Tote bag sablon trem uap Malang.", desc: "Tote bag kanvas dengan sablon trem uap Malang tempo dulu, tali panjang yang nyaman.", photos: [], added: 55, stock: 14, w: 4, q: 4.5 },
   { key: "pouch-kanvas-motif-ubin", seller: "rara", cat: "tote-bag", name: "Pouch Kanvas Motif Ubin", price: 48000, short: "Pouch kanvas motif ubin.", desc: "Pouch kanvas kecil bermotif ubin, cocok untuk alat tulis atau dompet koin.", photos: ["bag"], added: 100, stock: 5, w: 3, q: 4.4, status: "disembunyikan", statusAgo: 25, note: "Sementara disembunyikan untuk penataan katalog." },
@@ -1099,7 +1103,15 @@ export async function runSeed(prisma: PrismaClient): Promise<SeedSummary> {
     const replaces = sp.replaces ? productByKey.get(sp.replaces)!.id : null;
     return {
       id: p.id, artisanId: p.artisanId, categoryId: p.categoryId, name: sp.name, slug: sp.key, shortDescription: sp.short, description: sp.desc, price: sp.price,
-      images: urls(sp.photos), imageVariants: sp.imageVariants ? sp.imageVariants.map(([k, opt, val]) => ({ url: IMG[k], option: opt, value: val })) : Prisma.JsonNull,
+      images: urls(sp.photos),
+      imageVariants: sp.imageVariants
+        ? sp.imageVariants.map((entry) => {
+            const [k, second, third] = entry;
+            return Array.isArray(second)
+              ? { url: IMG[k], combination: second.map(([option, value]) => ({ option, value })) }
+              : { url: IMG[k], option: second, value: third };
+          })
+        : Prisma.JsonNull,
       isLimited: sp.limited ?? false, isActive: !sp.status || sp.status === "menunggu" ? sp.status !== "menunggu" : false,
       soldCount: sold, viewCount: view, approvalStatus: sp.status === "menunggu" ? "menunggu" : sp.status === "ditolak" ? "ditolak" : "disetujui",
       statusNote: sp.note ?? null, withdrawnAt: sp.status === "ditarik" ? p.statusAt : null, replacesProductId: replaces, slowWarnedAt: p.slowWarnedAt, lowStockNotifiedAt: p.lowStockNotifiedAt,

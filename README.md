@@ -13,6 +13,7 @@ Backend API berbasis Express.js, TypeScript, Prisma ORM, dan MySQL untuk platfor
    DATABASE_URL="mysql://root:@localhost:3306/sesuatu_darikota_malang"
    JWT_SECRET="rahasia_jwt_super_aman"
    ```
+   Untuk login Google, upload Cloudinary, email OTP, pembayaran Midtrans, dan AI, isi kredensial layanan terkait. Jangan menaruh `.env` atau nilai secret di Git.
 3. Install dependency:
    ```bash
    npm install
@@ -72,6 +73,26 @@ Salin `.env.example` ke `.env` dan isi variabel berikut. Nilai sesungguhnya diba
 | `JWT_SECRET` | Wajib | Auth tidak berjalan |
 | `DATABASE_URL` | Wajib | Server tidak bisa terhubung ke database |
 | `MIDTRANS_SERVER_KEY`, dll. | Untuk pembayaran | Pembuatan order Midtrans gagal |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Untuk Google Sign-In | Login Google tidak dapat digunakan |
+| `OPENAI_API_KEY` | Untuk moderasi foto | Moderasi foto tidak dapat memanggil OpenAI |
+
+### Moderasi foto dan fail mode
+
+Moderasi foto memakai OpenAI Moderation API sebelum foto katalog, cerita, atau pengajuan konsinyasi disimpan. Aktifkan dengan:
+
+```env
+OPENAI_API_KEY="isi-dengan-api-key-openai"
+MODERATION_ENABLED="true"
+MODERATION_FAIL_MODE="closed"
+```
+
+`MODERATION_FAIL_MODE="closed"` direkomendasikan untuk produksi: jika API OpenAI gagal, timeout, atau respons tidak valid, foto ditolak. Mode `open` hanya cocok untuk pengujian lokal karena foto dapat lolos ketika moderasi tidak tersedia. Kredensial OpenAI tidak boleh dicetak di log atau di-commit.
+
+### Upload dan CORS
+
+Foto harus diunggah melalui endpoint upload backend agar tercatat dan dapat dimoderasi. URL HTTPS eksternal yang tidak berasal dari endpoint upload akan ditolak saat dipakai pada produk, cerita, atau pengajuan konsinyasi. File yatim Cloudinary dibersihkan setelah masa `UPLOAD_ORPHAN_GRACE_HOURS`.
+
+Untuk pengembangan lokal, `CORS_ALLOWED_ORIGINS` boleh kosong sesuai konfigurasi saat ini. Bila frontend berjalan pada origin tertentu, isi daftar origin lengkap yang dipisahkan koma, tanpa wildcard.
 
 ## Autentikasi & Otorisasi
 
