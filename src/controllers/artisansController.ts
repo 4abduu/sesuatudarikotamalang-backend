@@ -7,6 +7,7 @@ import {
   updateMyArtisanProfile,
 } from "../dal/artisanProfile";
 import { presentArtisan } from "../lib/presentArtisan";
+import { attachEffectiveStockToVariants } from "../lib/stock";
 
 // GET /api/artisans/applications/mine — Cek status pengajuan konsinyasi milik user yang login (Daftarkan sebelum /:id)
 export const getMyApplications = async (req: Request, res: Response, next: NextFunction) => {
@@ -88,11 +89,13 @@ export const listArtisans = async (req: Request, res: Response, next: NextFuncti
     const artisansWithStats = artisans.map((a) => {
       const stats = artisanRatingMap[a.id];
       const avgRating = stats && stats.count > 0 ? Number((stats.sum / stats.count).toFixed(1)) : 0;
+      const soldCount = a.products.reduce((sum, product) => sum + product.soldCount, 0);
       // Publik: tanpa ownAvatarUrl
       return {
         ...presentArtisan(a),
         productCount: a.products.length,
         avgRating,
+        soldCount,
       };
     });
 
@@ -114,7 +117,7 @@ export const getArtisanById = async (req: Request, res: Response, next: NextFunc
       include: {
         products: {
           where: { isActive: true, approvalStatus: "disetujui" },
-          include: { story: true },
+          include: { story: true, variantOptions: true, variants: true },
         },
         user: { select: { avatarUrl: true } },
       },
@@ -127,17 +130,36 @@ export const getArtisanById = async (req: Request, res: Response, next: NextFunc
         status: "tampil",
         product: { artisanId: artisan.id },
       },
-      select: { rating: true },
+      select: { productId: true, rating: true },
     });
+    const productRatingMap = new Map<string, { sum: number; count: number }>();
+    for (const review of reviews) {
+      if (!review.productId) continue;
+      const current = productRatingMap.get(review.productId) ?? { sum: 0, count: 0 };
+      current.sum += review.rating;
+      current.count += 1;
+      productRatingMap.set(review.productId, current);
+    }
     const avgRating = reviews.length > 0
       ? Number((reviews.reduce((acc, r) => acc + r.rating, 0) / reviews.length).toFixed(1))
       : 0;
+
+    const productsWithStock = await Promise.all(artisan.products.map(async (product) => ({
+      ...product,
+      avgRating: productRatingMap.has(product.id)
+        ? Number((productRatingMap.get(product.id)!.sum / productRatingMap.get(product.id)!.count).toFixed(1))
+        : 0,
+      reviewCount: productRatingMap.get(product.id)?.count ?? 0,
+      variants: await attachEffectiveStockToVariants(product.variants),
+    })));
 
     res.json({
       // Publik: tanpa ownAvatarUrl
       artisan: {
         ...presentArtisan(artisan),
-        productCount: artisan.products.length,
+        products: productsWithStock,
+        productCount: productsWithStock.length,
+        soldCount: productsWithStock.reduce((sum, product) => sum + product.soldCount, 0),
         avgRating,
       },
     });

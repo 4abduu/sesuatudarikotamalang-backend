@@ -1,5 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { logger } from "../logger";
+import { assertAllowedCatalogFields } from "../lib/catalogPolicy";
+import { HttpError } from "../lib/httpError";
 
 const requestsByUser = new Map<string, number[]>();
 const RATE_WINDOW_MS = 60 * 60 * 1000;
@@ -242,6 +244,15 @@ export const storyDraft = async (req: Request, res: Response, next: NextFunction
     const inspirationStr = validatePoint(inspiration) ? (inspiration as string) : "";
     const hasProcessInput = processStr.trim().length > 0;
 
+    try {
+      assertAllowedCatalogFields({ productName, category, motif: motifStr, process: processStr, inspiration: inspirationStr });
+    } catch (error) {
+      if (error instanceof HttpError && error.code === "PRODUCT_POLICY_VIOLATION") {
+        return res.status(422).json({ error: "Konten tidak sesuai kebijakan toko, periksa poin cerita kamu", code: "AI_CONTENT_BLOCKED" });
+      }
+      throw error;
+    }
+
     if (tooManyRequests(req.user.id)) {
       return res.status(429).json({ error: "Kamu sudah terlalu sering mencoba, coba lagi nanti", code: "RATE_LIMITED" });
     }
@@ -290,6 +301,13 @@ export const storyDraft = async (req: Request, res: Response, next: NextFunction
       }
 
       const candidate = extraction.draft;
+
+      try {
+        assertAllowedCatalogFields(candidate);
+      } catch (error) {
+        if (error instanceof HttpError && error.code === "PRODUCT_POLICY_VIOLATION") continue;
+        throw error;
+      }
 
       // Normalisasi sebelum validasi (D11): bila !hasProcessInput, paksa candidate.proses = ""
       if (!hasProcessInput) {

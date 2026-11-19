@@ -181,6 +181,13 @@ export async function createApplicationForUser(user: AuthUser, input: {
   if (!isString(input.applicantName, { max: 191 }) || !isString(input.contact, { max: 191 }) || !isString(input.description, { max: 5000 })) {
     throw badRequest("Data pengajuan konsinyasi tidak valid");
   }
+  const contact = (input.contact as string).trim();
+  // Terima format lokal/internasional, tetapi ukur batas panjang setelah
+  // dinormalisasi ke format lokal 0xxxxxxxxxxx. Maksimal 12 digit lokal.
+  const normalizedContact = contact.replace(/^(?:\+62|62)/, "0");
+  if (!/^0[0-9]{8,11}$/.test(normalizedContact)) {
+    throw badRequest("contact harus berupa nomor WhatsApp yang valid (9-12 digit)", "INVALID_CONTACT");
+  }
   assertCleanFields({ "Nama pemohon": input.applicantName, "Nama toko": input.brandName, "Deskripsi pengajuan": input.description });
   assertAllowedCatalogFields({ "Nama toko": input.brandName, "Deskripsi pengajuan": input.description });
   if (input.categoryId !== undefined && (typeof input.categoryId !== "string" || !(await prisma.category.findUnique({ where: { id: input.categoryId } })))) {
@@ -225,7 +232,7 @@ export async function createApplicationForUser(user: AuthUser, input: {
     data: {
       userId: user.id,
       applicantName: input.applicantName as string,
-      contact: input.contact as string,
+      contact,
       brandName: finalBrandName,
       categoryId: input.categoryId,
       description: input.description as string,

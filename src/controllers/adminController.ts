@@ -8,7 +8,7 @@ import { normalizeBrandKey } from "../lib/brandKey";
 import { presentArtisan } from "../lib/presentArtisan";
 import { addHolidayFields } from "../lib/holidays";
 import { serializeProductStatus } from "../lib/productStatus";
-import { clearStoreOlshopCache, validateOlshopUrl } from "../lib/olshop";
+import { clearStoreOlshopCache, getStoreOlshopUrls, presentOlshop, validateOlshopUrl } from "../lib/olshop";
 import { createNotification, createOrderSoldNotifications } from "../dal/notifications";
 import { logger } from "../logger";
 
@@ -1380,7 +1380,13 @@ export const getAdminProductById = async (req: Request, res: Response, next: Nex
       include: { category: true, artisan: { include: { user: { select: { avatarUrl: true } } } }, variantOptions: true, variants: true, story: true },
     });
     if (!product) throw new HttpError(404, "Produk tidak ditemukan", "NOT_FOUND");
-    res.json({ product: serializeProductStatus({ ...product, artisan: presentArtisan(product.artisan) }) });
+    // Form admin perlu menerima konfigurasi mode/link marketplace mentah,
+    // sama seperti detail produk kreator/mobile.
+    res.json({ product: serializeProductStatus({
+      ...product,
+      artisan: presentArtisan(product.artisan),
+      ...presentOlshop(product, await getStoreOlshopUrls()),
+    }) });
   } catch (err) { next(err); }
 };
 
