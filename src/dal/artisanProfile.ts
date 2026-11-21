@@ -183,10 +183,10 @@ export async function createApplicationForUser(user: AuthUser, input: {
   }
   const contact = (input.contact as string).trim();
   // Terima format lokal/internasional, tetapi ukur batas panjang setelah
-  // dinormalisasi ke format lokal 0xxxxxxxxxxx. Maksimal 12 digit lokal.
+  // dinormalisasi ke format lokal 0xxxxxxxxxxxx. Maksimal 13 digit lokal.
   const normalizedContact = contact.replace(/^(?:\+62|62)/, "0");
-  if (!/^0[0-9]{8,11}$/.test(normalizedContact)) {
-    throw badRequest("contact harus berupa nomor WhatsApp yang valid (9-12 digit)", "INVALID_CONTACT");
+  if (!/^0[0-9]{8,12}$/.test(normalizedContact)) {
+    throw badRequest("contact harus berupa nomor WhatsApp yang valid (9-13 digit)", "INVALID_CONTACT");
   }
   assertCleanFields({ "Nama pemohon": input.applicantName, "Nama toko": input.brandName, "Deskripsi pengajuan": input.description });
   assertAllowedCatalogFields({ "Nama toko": input.brandName, "Deskripsi pengajuan": input.description });

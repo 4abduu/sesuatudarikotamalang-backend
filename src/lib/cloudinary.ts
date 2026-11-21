@@ -61,6 +61,8 @@ export function uploadBuffer(
         resource_type: "auto",
         public_id: publicId,
         overwrite: false,
+        format: "webp",
+        quality: "auto",
       },
       (error, result) => {
         if (error || !result) {

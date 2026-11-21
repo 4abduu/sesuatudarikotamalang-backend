@@ -1,159 +1,173 @@
 # Sesuatu DariKota Malang — Backend API
 
-Backend API berbasis Express.js, TypeScript, Prisma ORM, dan MySQL untuk platform **Sesuatu DariKota Malang**.
+> **Release v1.0.0** · Express.js · TypeScript · Prisma · MySQL
 
-## Setup Pertama Kali
+Backend utama platform **Sesuatu DariKota Malang**. Service ini menjadi sumber
+kebenaran untuk akun, katalog, varian, stok, pesanan, pembayaran, upload gambar,
+moderasi, email OTP, dan operasional admin.
 
-1. Pastikan MySQL sudah jalan (misal lewat Laragon), lalu buat database:
-   ```sql
-   CREATE DATABASE sesuatu_darikota_malang;
-   ```
-2. Salin `.env.example` menjadi `.env`, isi `DATABASE_URL` sesuai MySQL lokal, dan isi `JWT_SECRET` dengan string acak aman:
-   ```env
-   DATABASE_URL="mysql://root:@localhost:3306/sesuatu_darikota_malang"
-   JWT_SECRET="rahasia_jwt_super_aman"
-   ```
-   Untuk login Google, upload Cloudinary, email OTP, pembayaran Midtrans, dan AI, isi kredensial layanan terkait. Jangan menaruh `.env` atau nilai secret di Git.
-3. Install dependency:
-   ```bash
-   npm install
-   ```
-4. Jalankan migrasi Prisma untuk membuat skema tabel database:
-   ```bash
-   npm run prisma:migrate
-   ```
-5. Jalankan server pengembangan atau build:
-   ```bash
-   npm run dev        # Menjalankan dengan tsx watch (TypeScript live-reload)
-   npm run typecheck  # Menjalankan tsc --noEmit
-   npm run build      # Generates Prisma client & kompilasi ke dist/
-   npm start          # Menjalankan dari dist/server.js
-   ```
-   Server akan berjalan di `http://localhost:4000`. Akses `GET /` untuk memastikan server aktif `{ "status": "ok", ... }`.
+## Arsitektur
 
-## Struktur Project
+\`\`\`text
+admin-web ───────┐
+                 ├──> Backend API ───> MySQL
+user_mobile ────┘          │
+                           ├── Cloudinary (gambar)
+                           ├── OpenAI (moderasi)
+                           ├── Gemini (draft cerita)
+                           ├── Midtrans (pembayaran)
+                           └── Resend (email)
+\`\`\`
 
-```
-src/
-├── app.ts                # Konfigurasi Express, middleware, routing & error handling
-├── server.ts             # Entry point server (listen port & start cron job)
-├── lib/                  # Module helper (prisma.ts, stock.ts, midtrans.ts, mailer.ts, upload.ts)
-├── middleware/           # auth.ts (JWT verifier), requireRole.ts, rateLimiter.ts
-├── routes/               # Express router (auth, products, orders, payments, admin, dll.)
-├── controllers/          # Business logic handlers
-├── types/                # Type definitions custom (.d.ts)
-└── jobs/                 # Cron jobs (orderStatusJob.ts)
-```
+Frontend tidak menghitung ulang harga, stok, status order, atau aturan pembayaran.
+Semua keputusan bisnis tersebut dibuat dan divalidasi di backend.
 
-## Endpoint API Utama
+## Menjalankan lokal
 
-- **Auth**: `POST /api/auth/register`, `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/google`
-- **Katalog & Produk**: `GET /api/products`, `GET /api/products/:id`, `POST /api/products`
-- **Pesanan**: `POST /api/orders`, `GET /api/orders`, `GET /api/orders/:id`, `PATCH /api/orders/:id/cancel`
-- **Pembayaran**: `POST /api/payments/webhook` (Server-to-Server Midtrans Notification)
-- **Admin**: `GET /api/admin/dashboard`, `GET /api/admin/orders`, `PATCH /api/admin/orders/:id/status`, `GET /api/admin/applications`
+### Prasyarat
 
-Dokumentasi arsitektur dan aturan bisnis lengkap dapat dirujuk pada folder `docs/` (`docs/dokumen-master-sesuatu-darikota-malang.md` dan `docs/master-dokumen-v2.md`).
+- Node.js LTS, npm, dan MySQL 8 atau kompatibel.
+- Kredensial layanan pihak ketiga hanya bila fitur terkait ingin diuji.
 
-## Prisma Studio (GUI Data)
+### Instalasi
 
-```bash
+\`\`\`bash
+npm install
+\`\`\`
+
+Buat database lokal:
+
+\`\`\`sql
+CREATE DATABASE sesuatu_darikota_malang;
+\`\`\`
+
+Salin \`.env.example\` menjadi \`.env\`. Nilai minimum lokal:
+
+\`\`\`env
+NODE_ENV=development
+PORT=4000
+DATABASE_URL="mysql://root:@localhost:3306/sesuatu_darikota_malang"
+JWT_SECRET="gunakan-string-acak-minimal-32-karakter"
+\`\`\`
+
+Jalankan migrasi dan server:
+
+\`\`\`bash
+npm run prisma:migrate
+npm run dev
+\`\`\`
+
+Server tersedia di \`http://localhost:4000\`. Health check: \`GET /\`.
+
+## Environment variables
+
+| Variable | Kegunaan | Produksi |
+|---|---|:---:|
+| \`DATABASE_URL\` | Koneksi Prisma ke MySQL | Wajib |
+| \`JWT_SECRET\` | Signing JWT dan fallback OTP pepper | Wajib |
+| \`CORS_ALLOWED_ORIGINS\` | Origin frontend yang diizinkan | Wajib |
+| \`NODE_ENV\`, \`PORT\`, \`TRUST_PROXY\` | Runtime dan proxy deployment | Wajib sesuai deployment |
+| \`CLOUDINARY_CLOUD_NAME\`, \`CLOUDINARY_API_KEY\`, \`CLOUDINARY_API_SECRET\` | Upload gambar | Fitur upload |
+| \`OPENAI_API_KEY\`, \`MODERATION_ENABLED\`, \`MODERATION_FAIL_MODE\` | Moderasi gambar | Fitur moderasi |
+| \`GEMINI_API_KEY\`, \`GEMINI_MODEL\` | AI draft cerita | Fitur AI |
+| \`MIDTRANS_SERVER_KEY\`, \`MIDTRANS_CLIENT_KEY\`, \`MIDTRANS_IS_PRODUCTION\` | Pembayaran Snap | Fitur pembayaran |
+| \`GOOGLE_CLIENT_ID\` | Google Sign-In | Login Google |
+| \`RESEND_API_KEY\`, \`RESEND_FROM_EMAIL\` | OTP dan email | Fitur email |
+| \`PUBLIC_BASE_URL\` | URL publik backend | Direkomendasikan |
+| \`OTP_PEPPER\` | Pepper OTP khusus | Opsional |
+| \`SEED_DEMO_*\` | Akun demo | Lokal/demo saja |
+
+Jangan commit \`.env\`, token, API key, password database, atau private key.
+Nilai production disimpan di Railway Variables.
+
+Untuk produksi, gunakan:
+
+\`\`\`env
+MODERATION_ENABLED=true
+MODERATION_FAIL_MODE=closed
+\`\`\`
+
+Mode \`open\` hanya untuk pengujian lokal.
+
+## Database dan seed
+
+\`\`\`bash
+npm run prisma:generate
+npm run prisma:migrate       # development
+npm run prisma:deploy        # production, migration yang sudah committed
 npm run prisma:studio
-```
-
-## Konfigurasi Environment
-
-Salin `.env.example` ke `.env` dan isi variabel berikut. Nilai sesungguhnya dibagikan lewat jalur pribadi (bukan di repo).
-
-| Variabel | Wajib | Dampak bila kosong |
-|---|---|---|
-| `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` | Untuk fitur upload | `POST /api/upload/*` membalas **503** |
-| `GEMINI_API_KEY`, `GEMINI_MODEL` | Untuk fitur AI | `POST /api/ai/story-draft` membalas **503** |
-| `RESEND_API_KEY` | Untuk OTP email | OTP hanya dicetak di log server (mode simulasi) |
-| `JWT_SECRET` | Wajib | Auth tidak berjalan |
-| `DATABASE_URL` | Wajib | Server tidak bisa terhubung ke database |
-| `MIDTRANS_SERVER_KEY`, dll. | Untuk pembayaran | Pembuatan order Midtrans gagal |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Untuk Google Sign-In | Login Google tidak dapat digunakan |
-| `OPENAI_API_KEY` | Untuk moderasi foto | Moderasi foto tidak dapat memanggil OpenAI |
-
-### Moderasi foto dan fail mode
-
-Moderasi foto memakai OpenAI Moderation API sebelum foto katalog, cerita, atau pengajuan konsinyasi disimpan. Aktifkan dengan:
-
-```env
-OPENAI_API_KEY="isi-dengan-api-key-openai"
-MODERATION_ENABLED="true"
-MODERATION_FAIL_MODE="closed"
-```
-
-`MODERATION_FAIL_MODE="closed"` direkomendasikan untuk produksi: jika API OpenAI gagal, timeout, atau respons tidak valid, foto ditolak. Mode `open` hanya cocok untuk pengujian lokal karena foto dapat lolos ketika moderasi tidak tersedia. Kredensial OpenAI tidak boleh dicetak di log atau di-commit.
-
-### Upload dan CORS
-
-Foto harus diunggah melalui endpoint upload backend agar tercatat dan dapat dimoderasi. URL HTTPS eksternal yang tidak berasal dari endpoint upload akan ditolak saat dipakai pada produk, cerita, atau pengajuan konsinyasi. File yatim Cloudinary dibersihkan setelah masa `UPLOAD_ORPHAN_GRACE_HOURS`.
-
-Untuk pengembangan lokal, `CORS_ALLOWED_ORIGINS` boleh kosong sesuai konfigurasi saat ini. Bila frontend berjalan pada origin tertentu, isi daftar origin lengkap yang dipisahkan koma, tanpa wildcard.
-
-## Autentikasi & Otorisasi
-
-Backend mendukung registrasi, login email dan password, Google Sign-In, serta logout melalui `POST /api/auth/logout`. JWT berlaku 7 hari dan dikirim pada header `Authorization: Bearer <token>`. JWT dipakai karena sesuai untuk klien mobile dan tidak membutuhkan sesi server per request; komprominya adalah token sulit dicabut sebelum kedaluwarsa. Mitigasinya adalah denylist saat logout, `passwordChangedAt` saat ganti/reset password, dan pembacaan role terbaru dari database pada setiap request.
-
-Password tidak pernah disimpan sebagai plain text dan di-hash dengan bcrypt. OTP berlaku 10 menit, disimpan sebagai HMAC-SHA256, dan hangus setelah 5 percobaan salah pada kode yang sama. `OTP_PEPPER` dapat diisi sebagai kunci khusus; bila kosong, kunci diturunkan dari `JWT_SECRET`.
-
-| Role | Akses utama |
-|---|---|
-| `buyer` | katalog, pencarian, order milik sendiri, pembayaran, notifikasi dan ulasan milik sendiri, pengajuan konsinyasi |
-| `creator` | seluruh akses buyer yang relevan, serta profil kreator, produk, cerita, dan stok miliknya |
-| `admin` | dashboard, seluruh order, aplikasi konsinyasi, produk, ulasan, pengaturan, dan perubahan status administratif |
-
-Penegakan dilakukan berlapis: `requireAuth` dan `requireRole` untuk pemeriksaan kasar, policy/DAL untuk batas sebenarnya, serta kolom pemilik pada setiap query resource privat. `401` dengan `code: "UNAUTHORIZED"` berarti login ulang; `403` dengan `code: "FORBIDDEN"` berarti role atau izin tidak mencukupi; resource milik pengguna lain dikembalikan sebagai `404`. Token berada di header, bukan cookie, sehingga endpoint API ini tidak menggunakan cookie authentication dan tidak memerlukan mitigasi CSRF berbasis cookie.
-
-## Official Store dan Refund
-
-Official Store adalah penjual khusus yang tidak memiliki akun login. Buat secara idempoten dengan:
-
-```bash
-npm run prisma:seed:official
-```
-
-Perintah tersebut hanya membuat baris Official Store bila belum ada dan aman dijalankan pada database utama. Admin dapat membuat produk atas nama Official Store atau kreator aktif.
-
-Refund Midtrans dilakukan manual melalui WhatsApp admin; backend tidak memanggil API refund Midtrans. Sistem menghitung batas refund berdasarkan `refundWindowDays` (1, 3, atau 7 hari) dan jadwal pickup, lalu mencatat `refundStatus` sampai admin menandai refund selesai. Pesanan yang sudah melewati batas pengambilan tidak dapat dibatalkan atas permintaan pembeli, kecuali karena kesalahan toko. Default hold Cash/QRIS adalah 1 hari (1440 menit). Baris pengaturan lama di database tidak berubah otomatis dan perlu diperbarui melalui Pengaturan admin.
-
-### Akun uji untuk penilaian
-
-Akun demo terpisah dibuat oleh seed hanya jika `SEED_DEMO_PASSWORD` diisi. Seed bersifat idempoten dan tidak mengubah akun demo yang sudah ada.
-
-| Role | Email bawaan | Password |
-|---|---|---|
-| admin | `demo.admin@sesuatu.test` | `Admin123` |
-| creator | `demo.creator@sesuatu.test` | `Creator123` |
-| buyer | `demo.buyer@sesuatu.test` | `Buyer123` |
-
-Email dapat diganti melalui `SEED_DEMO_ADMIN_EMAIL`, `SEED_DEMO_CREATOR_EMAIL`, dan `SEED_DEMO_BUYER_EMAIL`. Jalankan seed setelah menyiapkan database dan environment:
-
-```bash
 npm run prisma:seed
-```
+npm run prisma:seed:official
+\`\`\`
 
-### Cara menguji
+Jalankan seeder demo hanya pada database demo. Jangan menjalankan \`migrate
+reset\`, \`db push\`, atau perintah destruktif pada database production.
 
-```bash
-# Login
-curl -X POST http://localhost:4000/api/auth/login -H "Content-Type: application/json" -d '{"email":"demo.buyer@sesuatu.test","password":"<PASSWORD>"}'
+## Fitur utama
 
-# Tanpa token -> 401 UNAUTHORIZED
-curl http://localhost:4000/api/auth/me
+- Auth password, Google Sign-In, logout per perangkat, OTP, lupa password,
+  ganti email, dan ganti password.
+- Katalog, kreator, produk, cerita, varian kombinasi, stok efektif, rating,
+  ulasan, pencarian, dan pagination.
+- Pengajuan kreator, dashboard kreator, upload produk, dan manajemen stok.
+- Order, pickup, Cash/QRIS, Midtrans Snap, webhook, bayar ulang, dan notifikasi.
+- Cloudinary upload dengan validasi tipe, magic bytes, moderasi, dan WebP untuk
+  unggahan baru.
+- Draft cerita Gemini, email Resend, dan dashboard operasional admin.
 
-# Buyer ke endpoint admin -> 403 FORBIDDEN
-curl http://localhost:4000/api/admin/dashboard -H "Authorization: Bearer <TOKEN_BUYER>"
+## Endpoint penting
 
-# Pengguna A membuka order pengguna B -> 404
-curl http://localhost:4000/api/orders/<ORDER_MILIK_B> -H "Authorization: Bearer <TOKEN_A>"
+Semua endpoint memakai prefix \`/api\`.
 
-# Logout lalu token yang sama -> request berikutnya 401
-curl -X POST http://localhost:4000/api/auth/logout -H "Authorization: Bearer <TOKEN>"
-curl http://localhost:4000/api/auth/me -H "Authorization: Bearer <TOKEN>"
-```
+| Area | Endpoint contoh |
+|---|---|
+| Auth | \`POST /api/auth/register\`, \`POST /api/auth/login\`, \`GET /api/auth/me\` |
+| Katalog | \`GET /api/products\`, \`GET /api/products/:id\` |
+| Upload | \`POST /api/upload/single\`, \`POST /api/upload/multiple\` |
+| Kreator | \`POST /api/artisans/apply\`, \`GET /api/artisans/:id\` |
+| Order | \`POST /api/orders\`, \`GET /api/orders/:id\` |
+| Payment | \`POST /api/orders/:id/pay\`, \`POST /api/payments/webhook\` |
+| Admin | \`GET /api/admin/dashboard\`, \`GET /api/admin/orders\` |
 
-> **Catatan:** variabel `GEMINI_API_KEY` dan `GEMINI_MODEL` harus diisi (tidak boleh hanya spasi) agar fitur AI aktif — nilai kosong `""` disamakan dengan tidak terkonfigurasi.
+Kontrak lengkap: [\`docs/API_CONTRACT.md\`](../docs/API_CONTRACT.md).
+
+## Upload gambar
+
+Format yang diterima JPEG, PNG, dan WebP, maksimal 2 MB. Backend memeriksa
+isi file, bukan hanya ekstensi atau MIME dari client.
+
+File yang signature-nya tidak cocok atau ditolak moderasi menghasilkan HTTP 422
+\`IMAGE_REJECTED\` dengan \`rejectedIndexes\`. Upload baru ditransformasi
+Cloudinary menjadi WebP dengan quality otomatis; file lama tidak dikonversi ulang.
+
+## Quality checks
+
+\`\`\`bash
+npm run typecheck
+npm run build
+\`\`\`
+
+Backend belum memiliki script test otomatis di \`package.json\`. Lakukan smoke
+test health check, login, upload, order, dan webhook pada environment yang aman.
+
+## Deployment Railway
+
+1. Push branch yang sudah diverifikasi ke GitHub.
+2. Pastikan Railway mengambil branch production yang benar.
+3. Isi Railway Variables dan domain API.
+4. Jalankan \`npx prisma migrate deploy\` untuk migration production.
+5. Cek deployment logs, health check, login, upload, dan webhook Midtrans.
+
+Jangan menjadikan seed demo sebagai pre-deploy command production.
+
+## Dokumentasi terkait
+
+- [API_CONTRACT.md](../docs/API_CONTRACT.md) — request, response, status, dan error.
+- [CHANGELOG-API.md](../docs/CHANGELOG-API.md) — riwayat perubahan dan template versi.
+- [dokumen master](../docs/dokumen-master-sesuatu-darikota-malang.md) — aturan bisnis.
+
+## Release v1.0.0
+
+Rilis pertama untuk demo akademik dan pengujian end-to-end backend, admin-web,
+dan aplikasi Flutter. Sebelum penggunaan publik, lakukan audit secret, backup
+database, payment production, observability, dan signing release mobile.

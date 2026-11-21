@@ -3,6 +3,7 @@ import { uploadBuffer, deleteFromCloudinary } from "../lib/cloudinary";
 import { moderateImage } from "../lib/imageModeration";
 import { HttpError } from "../lib/httpError";
 import { logger } from "../logger";
+import { hasValidSignature } from "../lib/fileSignature";
 
 async function getPrisma() {
   return (await import("../lib/prisma")).default;
@@ -24,6 +25,16 @@ async function moderateOrReject(req: Request, files: Express.Multer.File[]) {
   }
 }
 
+function validateFileSignatures(files: Express.Multer.File[]) {
+  const rejectedIndexes = files
+    .map((file, index) => hasValidSignature(file.buffer, file.mimetype) ? -1 : index)
+    .filter((index) => index >= 0);
+  if (rejectedIndexes.length === 0) return;
+  const error = new HttpError(422, "Foto ditolak: isi file tidak sesuai dengan format yang dipilih", "IMAGE_REJECTED");
+  (error as any).rejectedIndexes = rejectedIndexes;
+  throw error;
+}
+
 // Controller untuk menangani upload file tunggal atau jamak
 
 export const uploadSingle = async (req: Request, res: Response, next: NextFunction) => {
@@ -31,6 +42,7 @@ export const uploadSingle = async (req: Request, res: Response, next: NextFuncti
     if (!req.file) {
       return res.status(400).json({ error: "Tidak ada file yang diunggah" });
     }
+    validateFileSignatures([req.file]);
     await moderateOrReject(req, [req.file]);
 
     const uploaded = await uploadBuffer(req.file.buffer, {
@@ -79,6 +91,7 @@ export const uploadMultiple = async (req: Request, res: Response, next: NextFunc
     if (!files || files.length === 0) {
       return res.status(400).json({ error: "Tidak ada file yang diunggah" });
     }
+    validateFileSignatures(files);
     await moderateOrReject(req, files);
 
     const uploadedFiles: Array<{

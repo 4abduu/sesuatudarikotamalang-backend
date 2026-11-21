@@ -24,9 +24,11 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
   try {
     const { name, email, password } = req.body;
     assertCleanText("Nama", name);
-    if (!isString(name, { min: 2, max: 80 }) || !isEmail(email) || !isString(password) || !password) {
-      return res.status(400).json({ error: "name, email, password wajib diisi" });
-    }
+    if (!isString(name) || !name.trim()) return res.status(400).json({ error: "Nama lengkap wajib diisi" });
+    if (name.trim().length < 2 || name.trim().length > 80) return res.status(400).json({ error: "Nama lengkap harus 2 sampai 80 karakter" });
+    if (!isString(email) || !email.trim()) return res.status(400).json({ error: "Email wajib diisi" });
+    if (!isEmail(email.trim())) return res.status(400).json({ error: "Format email tidak valid. Contoh: nama@email.com" });
+    if (!isString(password) || !password) return res.status(400).json({ error: "Password wajib diisi" });
     if (Buffer.byteLength(password, "utf8") > 72) {
       return res.status(400).json({ error: "Password maksimal 72 byte" });
     }
@@ -71,9 +73,9 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
 export const login = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { email, password } = req.body;
-    if (!isString(email) || !isString(password) || !email || !password) {
-      return res.status(400).json({ error: "email dan password wajib diisi" });
-    }
+    if (!isString(email) || !email.trim()) return res.status(400).json({ error: "Email wajib diisi" });
+    if (!isEmail(email.trim())) return res.status(400).json({ error: "Format email tidak valid. Contoh: nama@email.com" });
+    if (!isString(password) || !password) return res.status(400).json({ error: "Password wajib diisi" });
 
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) {
