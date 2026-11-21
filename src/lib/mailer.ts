@@ -300,4 +300,48 @@ export async function sendOtpEmail(
   return result.data;
 }
 
-export default { sendOtpEmail };
+export interface AdminNotificationEmail {
+  subject: string;
+  title: string;
+  lines: Array<{ label: string; value: string }>;
+}
+
+/**
+ * Mengirim email operasional ke alamat notificationEmail pada AppSettings.
+ * Fungsi ini sengaja tidak melempar error konfigurasi agar email tidak
+ * membatalkan transaksi utama.
+ */
+export async function sendAdminNotificationEmail(notification: AdminNotificationEmail): Promise<void> {
+  const { default: prisma } = await import("./prisma");
+  const settings = await prisma.appSettings.findUnique({
+    where: { id: 1 },
+    select: { notificationEmail: true },
+  });
+  const to = settings?.notificationEmail?.trim();
+  if (!to) {
+    logger.warn("notificationEmail belum dikonfigurasi, email admin dilewati");
+    return;
+  }
+
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) {
+    logger.warn("RESEND_API_KEY kosong, email notifikasi admin dilewati");
+    return;
+  }
+
+  const resend = new Resend(apiKey);
+  const fromEmail = process.env.RESEND_FROM_EMAIL || "Sesuatu DariKota Malang <onboarding@resend.dev>";
+  const rows = notification.lines
+    .map(({ label, value }) => `<tr><td style="padding:6px 12px 6px 0;color:#6B5D4F">${escapeHtml(label)}</td><td style="padding:6px 0;font-weight:600">${escapeHtml(value)}</td></tr>`)
+    .join("");
+
+  const result = await resend.emails.send({
+    from: fromEmail,
+    to,
+    subject: notification.subject,
+    html: `<div style="font-family:Arial,sans-serif;color:#2B211A;max-width:600px"><h2 style="color:#A8452B">${escapeHtml(notification.title)}</h2><table>${rows}</table><p style="color:#6B5D4F">Buka dashboard admin untuk melihat detail lengkap.</p></div>`,
+  });
+  if (result.error) throw new Error(result.error.message || "Resend gagal mengirim email admin");
+}
+
+export default { sendOtpEmail, sendAdminNotificationEmail };

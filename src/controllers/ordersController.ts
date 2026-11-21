@@ -12,6 +12,7 @@ import { addHolidayFields, holidayInfoFor, loadHolidayContext } from "../lib/hol
 import { createNotification } from "../dal/notifications";
 import { logger } from "../logger";
 import { parsePagination, buildPagination } from "../lib/pagination";
+import { sendAdminNotificationEmail } from "../lib/mailer";
 
 // GET /api/orders — Riwayat pesanan milik user yang sedang login
 export const listOrders = async (req: Request, res: Response, next: NextFunction) => {
@@ -361,6 +362,20 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
     } catch (notificationError) {
       logger.warn({ err: notificationError, orderId: newOrder.id }, "notifikasi reservasi gagal dibuat");
     }
+
+    sendAdminNotificationEmail({
+      subject: `Pesanan baru - ${newOrder.orderNumber}`,
+      title: "Pesanan baru masuk",
+      lines: [
+        { label: "Nomor pesanan", value: newOrder.orderNumber },
+        { label: "Pembeli", value: req.user.email },
+        { label: "Total", value: `Rp${newOrder.totalAmount.toLocaleString("id-ID")}` },
+        { label: "Metode pembayaran", value: paymentMethod === "midtrans" ? "Midtrans" : "COD" },
+        { label: "Pickup", value: `${pickupDateStr} ${pickupSlot}` },
+      ],
+    }).catch((emailError) => {
+      logger.warn({ err: emailError, orderId: newOrder.id }, "email pesanan baru ke admin gagal");
+    });
 
     let snapResponse: any = null;
     if (paymentMethod === "midtrans") {
