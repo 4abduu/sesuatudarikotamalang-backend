@@ -37,10 +37,16 @@ function validateProductImages(images: unknown): string[] | null {
 function serializeProduct(product: any, store?: StoreOlshopUrls): any {
   if (!product) return product;
   const artisan = product.artisan ? presentArtisan(product.artisan) : product.artisan;
+  const imageVariants = Array.isArray(product.imageVariants) ? product.imageVariants : [];
   return serializeProductStatus({
     ...product,
     artisan,
-    imageVariants: Array.isArray(product.imageVariants) ? product.imageVariants : [],
+    images: normalizeImageOrder(
+      Array.isArray(product.images) ? product.images as string[] : [],
+      imageVariants,
+      Array.isArray(product.variantOptions) ? product.variantOptions : [],
+    ),
+    imageVariants,
     // olshop = pengaturan mentah per platform (untuk form edit); olshopLinks = link siap tampil di mobile
     ...presentOlshop(product, store),
   });
@@ -525,7 +531,7 @@ export const createProduct = async (req: Request, res: Response, next: NextFunct
         return res.status(400).json({ error: e.message });
       }
     }
-    const normalizedImages = normalizeImageOrder(parsedImages, cleanImageVariants);
+    const normalizedImages = normalizeImageOrder(parsedImages, cleanImageVariants, Array.isArray(variantOptions) ? variantOptions : []);
 
     // Buat produk + variantOptions + variants dalam satu transaksi
     const newProduct = await prisma.$transaction(async (tx) => {
@@ -700,10 +706,12 @@ export const updateProduct = async (req: Request, res: Response, next: NextFunct
     // Baca images + imageVariants lama sebelum update (untuk cleanup R3, R6)
     let oldImages: unknown = undefined;
     let currentImageVariants: any[] = [];
+    let currentVariantOptions: any[] = [];
     if (images !== undefined || rawImageVariants !== undefined) {
       const currentProduct = await prisma.product.findUnique({ where: { id }, select: { images: true, imageVariants: true, variantOptions: true } });
       if (images !== undefined) oldImages = currentProduct?.images;
       currentImageVariants = Array.isArray(currentProduct?.imageVariants) ? currentProduct!.imageVariants as any[] : [];
+      currentVariantOptions = Array.isArray(currentProduct?.variantOptions) ? currentProduct!.variantOptions as any[] : [];
     }
 
     // Hitung images akhir, imageVariants akhir, lalu normalize urutan (semantik PUT 2.5 nomor 6)
@@ -719,12 +727,11 @@ export const updateProduct = async (req: Request, res: Response, next: NextFunct
     let finalImageVariants: any[] | undefined = undefined;
     if (rawImageVariants !== undefined) {
       // Dikirim → validasi + ganti seluruh tautan (termasuk [] yang melepas semua)
-      const currentProduct2 = await prisma.product.findUnique({ where: { id }, select: { variantOptions: true } });
       try {
         finalImageVariants = validateImageVariants(
           rawImageVariants,
           finalImages ?? (Array.isArray(oldImages) ? oldImages as string[] : []),
-          (currentProduct2?.variantOptions ?? []) as any[]
+          currentVariantOptions
         );
       } catch (e: any) {
         return res.status(400).json({ error: e.message });
@@ -735,7 +742,7 @@ export const updateProduct = async (req: Request, res: Response, next: NextFunct
     }
 
     const normalizedImages = finalImages !== undefined
-      ? normalizeImageOrder(finalImages, finalImageVariants ?? currentImageVariants)
+      ? normalizeImageOrder(finalImages, finalImageVariants ?? currentImageVariants, currentVariantOptions)
       : undefined;
     if (finalImages !== undefined) await assertUploadedFileUrls(req.user, finalImages, "Foto produk");
 

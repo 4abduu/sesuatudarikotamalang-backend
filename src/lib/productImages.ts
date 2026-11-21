@@ -114,7 +114,11 @@ export function validateImageVariants(
 // Bila SEMUA bertautan, urutan asli dipakai.
 // ---------------------------------------------------------------------------
 
-export function normalizeImageOrder(images: string[], imageVariants: ImageVariantEntry[]): string[] {
+export function normalizeImageOrder(
+  images: string[],
+  imageVariants: ImageVariantEntry[],
+  variantOptions: VariantOption[] = [],
+): string[] {
   if (images.length === 0) return [];
 
   const linkedUrls = new Set(imageVariants.map((v) => v.url));
@@ -122,10 +126,34 @@ export function normalizeImageOrder(images: string[], imageVariants: ImageVarian
   const unlinked = images.filter((url) => !linkedUrls.has(url));
   const linked = images.filter((url) => linkedUrls.has(url));
 
-  // Bila semua bertautan → urutan asli
-  if (unlinked.length === 0) return images;
+  const originalIndex = new Map(images.map((url, index) => [url, index]));
+  const byUrl = new Map(imageVariants.map((entry) => [entry.url, entry]));
+  const optionOrder = variantOptions.map((option) => ({
+    name: option.name,
+    values: Array.isArray(option.values) ? option.values as string[] : [],
+  }));
+  const linkedSorted = [...linked].sort((a, b) => {
+    const aEntry = byUrl.get(a);
+    const bEntry = byUrl.get(b);
+    if (!aEntry || !bEntry) return (originalIndex.get(a) ?? 0) - (originalIndex.get(b) ?? 0);
+    const parts = (entry: ImageVariantEntry) => Array.isArray(entry.combination)
+      ? entry.combination
+      : entry.option && entry.value ? [{ option: entry.option, value: entry.value }] : [];
+    const aParts = parts(aEntry);
+    const bParts = parts(bEntry);
+    for (const option of optionOrder) {
+      const aPart = aParts.find((part) => part.option === option.name);
+      const bPart = bParts.find((part) => part.option === option.name);
+      const aRank = aPart ? option.values.indexOf(aPart.value) : option.values.length + 1;
+      const bRank = bPart ? option.values.indexOf(bPart.value) : option.values.length + 1;
+      const normalizedA = aRank < 0 ? option.values.length : aRank;
+      const normalizedB = bRank < 0 ? option.values.length : bRank;
+      if (normalizedA !== normalizedB) return normalizedA - normalizedB;
+    }
+    return (originalIndex.get(a) ?? 0) - (originalIndex.get(b) ?? 0);
+  });
 
-  return [...unlinked, ...linked];
+  return [...unlinked, ...linkedSorted];
 }
 
 // ---------------------------------------------------------------------------

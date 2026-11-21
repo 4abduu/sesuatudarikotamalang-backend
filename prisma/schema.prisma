@@ -409,6 +409,7 @@ model Payment {
   orderId              String    @unique
   order                Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
   midtransTransactionId String?
+  snapRedirectUrl      String?   @db.VarChar(1000)
   status               String // sesuai status dari Midtrans (settlement, pending, expire, dll)
   paidAt               DateTime?
   createdAt            DateTime  @default(now())

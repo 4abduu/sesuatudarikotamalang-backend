@@ -8,6 +8,7 @@ import { normalizeBrandKey } from "../lib/brandKey";
 import { presentArtisan } from "../lib/presentArtisan";
 import { addHolidayFields } from "../lib/holidays";
 import { serializeProductStatus } from "../lib/productStatus";
+import { normalizeImageOrder } from "../lib/productImages";
 import { clearStoreOlshopCache, getStoreOlshopUrls, presentOlshop, validateOlshopUrl } from "../lib/olshop";
 import { createNotification, createOrderSoldNotifications } from "../dal/notifications";
 import { logger } from "../logger";
@@ -1312,6 +1313,11 @@ export const listAdminProducts = async (req: Request, res: Response, next: NextF
     // Terapkan foto efektif artisan sebelum dikembalikan
     const presentedProducts = products.map((p) => serializeProductStatus({
       ...p,
+      images: normalizeImageOrder(
+        Array.isArray(p.images) ? p.images.map(String) : [],
+        (Array.isArray(p.imageVariants) ? p.imageVariants : []) as any[],
+        (Array.isArray(p.variantOptions) ? p.variantOptions : []) as any[],
+      ),
       artisan: p.artisan ? presentArtisan(p.artisan) : p.artisan,
     }));
 
@@ -1384,6 +1390,11 @@ export const getAdminProductById = async (req: Request, res: Response, next: Nex
     // sama seperti detail produk kreator/mobile.
     res.json({ product: serializeProductStatus({
       ...product,
+      images: normalizeImageOrder(
+        Array.isArray(product.images) ? product.images.map(String) : [],
+        (Array.isArray(product.imageVariants) ? product.imageVariants : []) as any[],
+        (Array.isArray(product.variantOptions) ? product.variantOptions : []) as any[],
+      ),
       artisan: presentArtisan(product.artisan),
       ...presentOlshop(product, await getStoreOlshopUrls()),
     }) });

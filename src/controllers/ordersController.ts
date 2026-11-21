@@ -42,8 +42,12 @@ export const getOrderById = async (req: Request, res: Response, next: NextFuncti
 
     const order = await getOrderForUser(req.user, id);
     const settings = await prisma.appSettings.findUnique({ where: { id: 1 } });
+    const payment = (order as any).payment as { status?: string; midtransTransactionId?: string | null; snapRedirectUrl?: string | null } | null;
+    const pendingSnap = order.paymentMethod === "midtrans" && order.status === "menunggu_bayar" && payment?.snapRedirectUrl
+      ? { token: payment.midtransTransactionId, redirect_url: payment.snapRedirectUrl }
+      : undefined;
 
-    res.json({ order: { ...order, refund: computeRefund({ order: order as any, payment: (order as any).payment, settings }) } });
+    res.json({ order: { ...order, ...(pendingSnap ? { snap: pendingSnap } : {}), refund: computeRefund({ order: order as any, payment: (order as any).payment, settings }) } });
   } catch (err) {
     next(err);
   }
@@ -408,6 +412,7 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
           data: {
             orderId: newOrder.id,
             midtransTransactionId: transaction.token,
+            snapRedirectUrl: transaction.redirect_url,
             status: "pending",
           },
         });
@@ -474,6 +479,14 @@ export const repayOrder = async (req: Request, res: Response, next: NextFunction
     // Idempotency guard: a payment record means Snap was already created for this order.
     const existingPayment = await prisma.payment.findUnique({ where: { orderId: order.id } });
     if (existingPayment) {
+      if (existingPayment.status === "pending" && existingPayment.snapRedirectUrl) {
+        return res.json({
+          snap: {
+            token: existingPayment.midtransTransactionId,
+            redirect_url: existingPayment.snapRedirectUrl,
+          },
+        });
+      }
       return res.status(409).json({
         error: "Pembayaran untuk pesanan ini sudah dibuat. Selesaikan lewat instruksi pembayaran sebelumnya atau tunggu hingga kedaluwarsa.",
         code: "PAYMENT_ALREADY_CREATED",
@@ -530,6 +543,7 @@ export const repayOrder = async (req: Request, res: Response, next: NextFunction
         data: {
           orderId: order.id,
           midtransTransactionId: transaction.token,
+          snapRedirectUrl: transaction.redirect_url,
           status: "pending",
         },
       });
