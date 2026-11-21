@@ -8,6 +8,8 @@ import {
 } from "../dal/artisanProfile";
 import { presentArtisan } from "../lib/presentArtisan";
 import { attachEffectiveStockToVariants } from "../lib/stock";
+import { sendAdminNotificationEmail } from "../lib/mailer";
+import { logger } from "../logger";
 
 // GET /api/artisans/applications/mine — Cek status pengajuan konsinyasi milik user yang login (Daftarkan sebelum /:id)
 export const getMyApplications = async (req: Request, res: Response, next: NextFunction) => {
@@ -191,6 +193,19 @@ export const applyConsignment = async (req: Request, res: Response, next: NextFu
       description,
       sampleFileUrl,
       samplePhotos,
+    });
+
+    sendAdminNotificationEmail({
+      subject: `Pengajuan kreator baru - ${application.brandName}`,
+      title: "Pengajuan kreator baru",
+      lines: [
+        { label: "Pemohon", value: application.applicantName },
+        { label: "Nama brand", value: application.brandName },
+        { label: "Kontak", value: application.contact },
+        { label: "Status", value: "Menunggu moderasi admin" },
+      ],
+    }).catch((emailError) => {
+      logger.warn({ err: emailError, applicationId: application.id }, "email pengajuan kreator ke admin gagal");
     });
 
     res.status(201).json({ application });

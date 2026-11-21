@@ -5,6 +5,7 @@ import { effectiveStock } from "../lib/stock";
 import { isPaymentSuccess } from "../lib/paymentStatus";
 import { createNotification, createOrderSoldNotifications } from "../dal/notifications";
 import { logger } from "../logger";
+import { sendAdminNotificationEmail } from "../lib/mailer";
 
 // POST /api/payments/webhook — Terima Notifikasi Webhook dari Server Midtrans (TANPA requireAuth)
 export const handleWebhook = async (req: Request, res: Response, next: NextFunction) => {
@@ -70,6 +71,7 @@ export const handleWebhook = async (req: Request, res: Response, next: NextFunct
     }
 
     let resultStatus = order.status;
+    let paymentJustSettled = false;
 
     // Update status order dalam database transaction
     await prisma.$transaction(async (tx) => {
@@ -131,6 +133,7 @@ export const handleWebhook = async (req: Request, res: Response, next: NextFunct
               pickupDeadline: pickupDeadline,
             },
           });
+          paymentJustSettled = true;
 
           // Akumulasi soldCount idempoten (hanya jika sebelumnya bukan lunas)
           for (const item of freshOrder.items) {
@@ -308,6 +311,21 @@ export const handleWebhook = async (req: Request, res: Response, next: NextFunct
         }
       }
     }, { isolationLevel: "ReadCommitted" });
+
+    if (paymentJustSettled) {
+      sendAdminNotificationEmail({
+        subject: `Pembayaran berhasil - ${order.orderNumber}`,
+        title: "Pembayaran Midtrans berhasil",
+        lines: [
+          { label: "Nomor pesanan", value: order.orderNumber },
+          { label: "Total", value: `Rp${order.totalAmount.toLocaleString("id-ID")}` },
+          { label: "Status pesanan", value: resultStatus },
+          { label: "Status transaksi", value: transaction_status },
+        ],
+      }).catch((emailError) => {
+        logger.warn({ err: emailError, orderId: order.id }, "email pembayaran berhasil ke admin gagal");
+      });
+    }
 
     res.status(200).json({ received: true, status: resultStatus });
   } catch (err) {
