@@ -101,10 +101,24 @@ export const listArtisans = async (req: Request, res: Response, next: NextFuncti
       };
     });
 
-    // Official Store tidak masuk daftar kreator; dikirim terpisah lewat field officialStore
+    // Official Store tidak masuk daftar kreator; dikirim terpisah lewat field officialStore.
+    // Kreator publik diranking balance: 60% penjualan ternormalisasi + 40% rating.
+    const officialStore = artisansWithStats.find((a) => (a as any).isOfficial) ?? null;
+    const publicArtisans = artisansWithStats.filter((a) => !(a as any).isOfficial);
+    const maxSold = publicArtisans.reduce((max, artisan) => Math.max(max, artisan.soldCount), 0);
+    publicArtisans.sort((a, b) => {
+      const aScore = (maxSold > 0 ? a.soldCount / maxSold : 0) * 0.6 + (a.avgRating / 5) * 0.4;
+      const bScore = (maxSold > 0 ? b.soldCount / maxSold : 0) * 0.6 + (b.avgRating / 5) * 0.4;
+      return bScore - aScore
+        || b.soldCount - a.soldCount
+        || b.avgRating - a.avgRating
+        || String((a as any).name ?? '').localeCompare(String((b as any).name ?? ''))
+        || String((a as any).id ?? '').localeCompare(String((b as any).id ?? ''));
+    });
+
     res.json({
-      artisans: artisansWithStats.filter((a) => !(a as any).isOfficial),
-      officialStore: artisansWithStats.find((a) => (a as any).isOfficial) ?? null,
+      artisans: publicArtisans,
+      officialStore,
     });
   } catch (err) {
     next(err);

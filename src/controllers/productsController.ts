@@ -67,7 +67,7 @@ export const listProducts = async (req: Request, res: Response, next: NextFuncti
         return res.status(400).json({ error: `${name} harus berupa string` });
       }
     }
-    if (sort !== undefined && !["termurah", "termahal", "terlaris", "terpopuler"].includes(sort as string)) {
+    if (sort !== undefined && !["rekomendasi", "termurah", "termahal", "terlaris", "terpopuler"].includes(sort as string)) {
       return res.status(400).json({ error: "sort tidak valid" });
     }
 
@@ -107,6 +107,7 @@ export const listProducts = async (req: Request, res: Response, next: NextFuncti
       ];
     }
 
+    const isRecommendationSort = sort === "rekomendasi";
     let orderBy: any = { createdAt: "desc" };
     if (sort === "termurah") orderBy = { price: "asc" };
     if (sort === "termahal") orderBy = { price: "desc" };
@@ -114,14 +115,56 @@ export const listProducts = async (req: Request, res: Response, next: NextFuncti
     if (sort === "terpopuler") orderBy = { viewCount: "desc" };
 
     let total: number | undefined = undefined;
-    if (parsedPage !== undefined && parsedLimit !== undefined) {
+    let productWhere = where;
+    let recommendationOrder: string[] | undefined;
+
+    if (isRecommendationSort) {
+      // Ranking deterministik: 60% penjualan ternormalisasi + 40% rating.
+      // Semua kandidat diranking sebelum pagination agar halaman berikutnya
+      // tidak mengulang atau melewatkan produk yang skornya lebih tinggi.
+      const candidates = await prisma.product.findMany({
+        where,
+        select: { id: true, soldCount: true, createdAt: true },
+      });
+      const candidateIds = candidates.map((candidate) => candidate.id);
+      const candidateReviews = await prisma.review.groupBy({
+        by: ["productId"],
+        where: { productId: { in: candidateIds }, status: "tampil" },
+        _avg: { rating: true },
+      });
+      const ratingByProduct = new Map(
+        candidateReviews
+          .filter((review) => review.productId)
+          .map((review) => [review.productId as string, review._avg.rating ?? 0]),
+      );
+      const maxSold = candidates.reduce((max, candidate) => Math.max(max, candidate.soldCount), 0);
+
+      candidates.sort((a, b) => {
+        const aRating = Number(ratingByProduct.get(a.id) ?? 0);
+        const bRating = Number(ratingByProduct.get(b.id) ?? 0);
+        const aScore = (maxSold > 0 ? a.soldCount / maxSold : 0) * 0.6 + (aRating / 5) * 0.4;
+        const bScore = (maxSold > 0 ? b.soldCount / maxSold : 0) * 0.6 + (bRating / 5) * 0.4;
+        return bScore - aScore
+          || b.soldCount - a.soldCount
+          || bRating - aRating
+          || b.createdAt.getTime() - a.createdAt.getTime()
+          || a.id.localeCompare(b.id);
+      });
+
+      recommendationOrder = candidates.map((candidate) => candidate.id);
+      total = recommendationOrder.length;
+      const pageIds = parsedPage !== undefined && parsedLimit !== undefined
+        ? recommendationOrder.slice((parsedPage - 1) * parsedLimit, parsedPage * parsedLimit)
+        : recommendationOrder;
+      productWhere = { ...where, id: { in: pageIds } };
+    } else if (parsedPage !== undefined && parsedLimit !== undefined) {
       total = await prisma.product.count({ where });
     }
 
-    const products = await prisma.product.findMany({
-      where,
+    let products = await prisma.product.findMany({
+      where: productWhere,
       orderBy,
-      ...(parsedPage !== undefined && parsedLimit !== undefined
+      ...(!isRecommendationSort && parsedPage !== undefined && parsedLimit !== undefined
         ? { skip: (parsedPage - 1) * parsedLimit, take: parsedLimit }
         : {}),
       include: {
@@ -132,6 +175,11 @@ export const listProducts = async (req: Request, res: Response, next: NextFuncti
         story: true,
       },
     });
+
+    if (recommendationOrder) {
+      const rank = new Map(recommendationOrder.map((id, index) => [id, index]));
+      products.sort((a, b) => (rank.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.id) ?? Number.MAX_SAFE_INTEGER));
+    }
 
     // A3: Agregasi rating dan jumlah ulasan (hanya review tampil) dengan satu groupBy
     const productIds = products.map((p) => p.id);
