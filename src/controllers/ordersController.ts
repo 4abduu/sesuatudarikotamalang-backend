@@ -13,6 +13,8 @@ import { createNotification } from "../dal/notifications";
 import { logger } from "../logger";
 import { parsePagination, buildPagination } from "../lib/pagination";
 import { sendAdminNotificationEmail } from "../lib/mailer";
+import { normalizeOrderItems, resolveVariantForProduct, variantLabel } from "../lib/cart";
+import { MAX_ORDER_TOTAL, MAX_QTY_PER_LINE } from "../lib/orderLimits";
 
 // GET /api/orders — Riwayat pesanan milik user yang sedang login
 export const listOrders = async (req: Request, res: Response, next: NextFunction) => {
@@ -56,23 +58,24 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
       return res.status(401).json({ error: "Belum login" });
     }
 
-    const { productId, variantId, pickupDate, pickupSlot, paymentMethod } = req.body;
+    const { pickupDate, pickupSlot, paymentMethod } = req.body ?? {};
+    const normalizedItems = normalizeOrderItems(req.body);
 
     if (
-      typeof productId !== "string" ||
       typeof pickupDate !== "string" ||
       typeof pickupSlot !== "string" ||
-      typeof paymentMethod !== "string" ||
-      (variantId !== undefined && variantId !== null && typeof variantId !== "string")
+      typeof paymentMethod !== "string"
     ) {
       return res.status(400).json({
-        error: "productId, pickupDate, pickupSlot, dan paymentMethod wajib diisi",
+        error: "items, pickupDate, pickupSlot, dan paymentMethod wajib diisi",
+        code: "VALIDATION_ERROR",
       });
     }
 
-    if (!productId || !pickupDate || !pickupSlot || !paymentMethod) {
+    if (!pickupDate || !pickupSlot || !paymentMethod) {
       return res.status(400).json({
-        error: "productId, pickupDate, pickupSlot, dan paymentMethod wajib diisi",
+        error: "items, pickupDate, pickupSlot, dan paymentMethod wajib diisi",
+        code: "VALIDATION_ERROR",
       });
     }
 
@@ -233,58 +236,38 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
         throw { status: 409, message: "Slot pickup ini sudah penuh. Silakan pilih slot atau tanggal lain.", code: "SLOT_FULL" };
       }
 
-      // 1. Ambil data produk
-      const product = await tx.product.findUnique({
-        where: { id: productId },
-        include: {
-          artisan: true,
-          variantOptions: true,
-        },
-      });
-
-      if (!product || !product.isActive || product.approvalStatus !== "disetujui" || product.withdrawnAt) {
-        throw { status: 409, message: "Produk tidak tersedia untuk dipesan", code: "PRODUCT_UNAVAILABLE" };
+      const products = await tx.product.findMany({ where: { id: { in: normalizedItems.items.map((item: { productId: string }) => item.productId) } }, include: { artisan: true, variantOptions: true } });
+      const productMap = new Map(products.map((product) => [product.id, product]));
+      const resolved = [] as Array<{ product: any; variant: any; quantity: number }>;
+      const unavailable: any[] = [];
+      for (const input of normalizedItems.items) {
+        const product = productMap.get(input.productId);
+        if (!product) { unavailable.push({ productId: input.productId, variantId: input.variantId, productName: "Produk", variantLabel: "Varian default", reason: "PRODUCT_UNAVAILABLE", requested: input.quantity, available: 0 }); continue; }
+        const variant = await resolveVariantForProduct(tx, product, input.variantId);
+        const key = variant.id;
+        const existing = resolved.find((row) => row.variant.id === key);
+        if (existing) { existing.quantity += input.quantity; if (existing.quantity > MAX_QTY_PER_LINE) throw { status: 400, message: "Jumlah per varian maksimal 10 unit", code: "VALIDATION_ERROR" }; continue; }
+        resolved.push({ product, variant, quantity: input.quantity });
       }
-
-      // F-13: Blokir pemesanan produk milik kreator nonaktif
-      if (product.artisan && product.artisan.status !== "aktif") {
-        throw { status: 403, message: "Produk ini tidak tersedia karena kreator sedang nonaktif" };
+      const sorted = [...resolved].sort((a, b) => a.variant.id.localeCompare(b.variant.id));
+      for (const row of sorted) await tx.$queryRaw`SELECT id FROM product_variants WHERE id = ${row.variant.id} FOR UPDATE`;
+      for (const row of sorted) {
+        const { product, variant, quantity } = row;
+        if (product.artisan?.userId === userId) throw { status: 403, message: "Kamu tidak bisa membeli produkmu sendiri", code: "OWN_PRODUCT" };
+        let reason: string | null = null;
+        if (!product.isActive || product.approvalStatus !== "disetujui" || product.withdrawnAt) reason = "PRODUCT_UNAVAILABLE";
+        else if (product.artisan?.status !== "aktif") reason = "CREATOR_INACTIVE";
+        const available = reason ? 0 : await effectiveStock(variant.id, tx);
+        if (!reason && available <= 0) reason = "OUT_OF_STOCK";
+        else if (!reason && quantity > available) reason = "INSUFFICIENT_STOCK";
+        if (reason) unavailable.push({ productId: product.id, variantId: variant.id, productName: product.name, variantLabel: variantLabel(variant.combination), reason, requested: quantity, available });
       }
-
-      // 2. Validasi larangan membeli produk sendiri
-      if (product.artisan?.userId === userId) {
-        throw { status: 403, message: "Kamu tidak bisa membeli produkmu sendiri" };
+      if (unavailable.length > 0) {
+        const error: any = { status: 409, message: unavailable.length === 1 && unavailable[0].reason === "OUT_OF_STOCK" ? "Maaf, stok produk ini baru saja habis" : "Beberapa item tidak tersedia. Periksa kembali pesananmu.", code: "ITEMS_UNAVAILABLE", unavailable };
+        throw error;
       }
-
-      // 3. Validasi Varian & Stok Efektif (Atomic Check)
-      let variant: any = null;
-      if (product.variantOptions && product.variantOptions.length > 0) {
-        if (!variantId) {
-          throw { status: 400, message: "Produk ini memiliki varian. Pilih varian terlebih dahulu" };
-        }
-        variant = await tx.productVariant.findUnique({ where: { id: variantId } });
-        if (!variant || variant.productId !== product.id) {
-          throw { status: 400, message: "Varian tidak valid untuk produk ini" };
-        }
-      } else {
-        // Produk tanpa varian: gunakan varian default (combination: [])
-        variant = await tx.productVariant.findFirst({
-          where: { productId: product.id },
-          orderBy: { id: "asc" },
-        });
-      }
-
-      if (!variant) {
-        throw { status: 400, message: "Varian produk tidak ditemukan" };
-      }
-
-      // Lock baris variant secara eksklusif (Pessimistic Locking) untuk mencegah race condition
-      await tx.$queryRaw`SELECT id FROM product_variants WHERE id = ${variant.id} FOR UPDATE`;
-
-      const effStock = await effectiveStock(variant.id, tx);
-      if (effStock <= 0) {
-        throw { status: 409, message: "Maaf, stok produk ini baru saja habis" };
-      }
+      const totalAmount = sorted.reduce((sum, row) => sum + row.product.price * row.quantity, 0);
+      if (totalAmount > MAX_ORDER_TOTAL) throw { status: 400, message: "Total pesanan terlalu besar", code: "VALIDATION_ERROR" };
 
       // 4. Generate Order Number Unik (SDK-XXXX) dengan retry loop untuk mencegah collision
       let orderNumber = "";
@@ -321,26 +304,20 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
           userId,
           paymentMethod: normalizedPaymentMethod,
           status: "menunggu_bayar", // Berstatus awal menunggu_bayar baik COD maupun Midtrans
-          totalAmount: product.price,
+          totalAmount,
           pickupDate: new Date(pickupDateStr),
           pickupSlot,
           holdExpiresAt,
           pickupDeadline,
           items: {
-            create: [
-              {
-                productId: product.id,
-                variantId: variant ? variant.id : null,
-                quantity: 1,
-                priceSnapshot: product.price,
-              },
-            ],
+            create: sorted.map((row) => ({ productId: row.product.id, variantId: row.variant.id, quantity: row.quantity, priceSnapshot: row.product.price })),
           },
         },
         include: {
-          items: { include: { product: true, variant: true } },
+          items: { include: { product: true, variant: true, review: { select: { id: true } } } },
         },
       });
+      if (normalizedItems.source === "cart") await tx.cartItem.deleteMany({ where: { userId, variantId: { in: sorted.map((row) => row.variant.id) } } });
 
             return createdOrder;
           }, { isolationLevel: "ReadCommitted" });
@@ -357,7 +334,7 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
         userId: req.user.id,
         type: "pesanan_update",
         title: "Reservasi berhasil dibuat",
-        body: `Reservasi ${newOrder.orderNumber} berhasil dibuat dengan metode ${paymentMethod === "midtrans" ? "Midtrans" : "COD"}. Batas hold: ${newOrder.holdExpiresAt?.toISOString() ?? "tidak ada"}.`,
+        body: `Reservasi ${newOrder.orderNumber} (${newOrder.items.length} item) berhasil dibuat dengan metode ${paymentMethod === "midtrans" ? "Midtrans" : "COD"}. Batas hold: ${newOrder.holdExpiresAt?.toISOString() ?? "tidak ada"}.`,
       });
     } catch (notificationError) {
       logger.warn({ err: notificationError, orderId: newOrder.id }, "notifikasi reservasi gagal dibuat");
@@ -370,6 +347,7 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
         { label: "Nomor pesanan", value: newOrder.orderNumber },
         { label: "Pembeli", value: req.user.email },
         { label: "Total", value: `Rp${newOrder.totalAmount.toLocaleString("id-ID")}` },
+        { label: "Jumlah item", value: `${newOrder.items.length} baris / ${newOrder.items.reduce((sum: number, item: any) => sum + item.quantity, 0)} unit` },
         { label: "Metode pembayaran", value: paymentMethod === "midtrans" ? "Midtrans" : "COD" },
         { label: "Pickup", value: `${pickupDateStr} ${pickupSlot}` },
       ],
@@ -424,6 +402,7 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
     if (err.status) {
       const errorResp: any = { error: err.message };
       if (err.code) errorResp.code = err.code;
+      if (Array.isArray(err.unavailable)) errorResp.unavailable = err.unavailable;
       return res.status(err.status).json(errorResp);
     }
     next(err);

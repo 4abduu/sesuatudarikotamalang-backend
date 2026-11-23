@@ -570,6 +570,7 @@ export async function runSeed(prisma: PrismaClient): Promise<SeedSummary> {
   const [adminHash, demoHash] = await Promise.all([bcrypt.hash(adminRawPassword, 10), bcrypt.hash(demoRawPassword, 10)]);
 
   /* ---------- 3.1 reset ---------- */
+  await prisma.cartItem.deleteMany();
   await prisma.review.deleteMany();
   await prisma.orderItem.deleteMany();
   await prisma.payment.deleteMany();
