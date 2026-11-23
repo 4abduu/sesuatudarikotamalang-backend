@@ -36,6 +36,7 @@ if (missingOptionals.length > 0) {
 import authRoutes from "./routes/authRoutes";
 import productsRoutes from "./routes/productsRoutes";
 import ordersRoutes from "./routes/ordersRoutes";
+import cartRoutes from "./routes/cartRoutes";
 import artisansRoutes from "./routes/artisansRoutes";
 import reviewsRoutes from "./routes/reviewsRoutes";
 import adminRoutes from "./routes/adminRoutes";
@@ -112,6 +113,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/categories", categoriesRoutes);
 app.use("/api/products", productsRoutes);
 app.use("/api/orders", ordersRoutes);
+app.use("/api/cart", cartRoutes);
 app.use("/api/artisans", artisansRoutes);
 app.use("/api/reviews", reviewsRoutes);
 app.use("/api/admin", adminRoutes);

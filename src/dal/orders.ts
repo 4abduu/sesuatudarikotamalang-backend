@@ -10,6 +10,7 @@ const orderInclude = {
     include: {
       product: { include: { artisan: { select: { id: true, brandName: true, isOfficial: true } } } },
       variant: true,
+      review: { select: { id: true } },
     },
   },
   payment: true,

@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import prisma from "../lib/prisma";
+import { MAX_ORDER_LINES, MAX_QTY_PER_LINE } from "../lib/orderLimits";
 
 // GET /api/settings/public — A6: Pengaturan publik (nomor WA, kontak, Tentang Kami, link toko olshop, durasi hold, batas pickup; tanpa email internal)
 export const getPublicSettings = async (req: Request, res: Response, next: NextFunction) => {
@@ -22,6 +23,8 @@ export const getPublicSettings = async (req: Request, res: Response, next: NextF
         holdDurationMinutes: settings.holdDurationMinutes,
         pickupDeadlineDays: settings.pickupDeadlineDays,
         refundWindowDays: settings.refundWindowDays,
+        maxOrderLines: MAX_ORDER_LINES,
+        maxQuantityPerLine: MAX_QTY_PER_LINE,
       },
     });
   } catch (err) {
