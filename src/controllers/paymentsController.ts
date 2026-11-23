@@ -6,6 +6,7 @@ import { isPaymentSuccess } from "../lib/paymentStatus";
 import { createNotification, createOrderSoldNotifications } from "../dal/notifications";
 import { logger } from "../logger";
 import { sendAdminNotificationEmail } from "../lib/mailer";
+import { orderItemEmailLines } from "../lib/notificationEmail";
 
 // POST /api/payments/webhook — Terima Notifikasi Webhook dari Server Midtrans (TANPA requireAuth)
 export const handleWebhook = async (req: Request, res: Response, next: NextFunction) => {
@@ -41,7 +42,10 @@ export const handleWebhook = async (req: Request, res: Response, next: NextFunct
     // Cari pesanan berdasarkan orderNumber (contoh: SDK-XXXX)
     const order = await prisma.order.findUnique({
       where: { orderNumber: order_id },
-      include: { items: true },
+      include: {
+        items: { include: { product: { select: { name: true } }, variant: { select: { combination: true } } } },
+        user: { select: { name: true, email: true } },
+      },
     });
 
     if (!order) {
@@ -316,11 +320,15 @@ export const handleWebhook = async (req: Request, res: Response, next: NextFunct
       sendAdminNotificationEmail({
         subject: `Pembayaran berhasil - ${order.orderNumber}`,
         title: "Pembayaran Midtrans berhasil",
+        orderId: order.id,
         lines: [
           { label: "Nomor pesanan", value: order.orderNumber },
+          { label: "Pembeli", value: `${order.user.name} (${order.user.email})` },
           { label: "Total", value: `Rp${order.totalAmount.toLocaleString("id-ID")}` },
           { label: "Status pesanan", value: resultStatus },
           { label: "Status transaksi", value: transaction_status },
+          { label: "Pickup", value: `${order.pickupDate.toISOString().slice(0, 10)} ${order.pickupSlot} WIB` },
+          ...orderItemEmailLines(order.items),
         ],
       }).catch((emailError) => {
         logger.warn({ err: emailError, orderId: order.id }, "email pembayaran berhasil ke admin gagal");

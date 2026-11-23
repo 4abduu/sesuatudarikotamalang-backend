@@ -18,6 +18,7 @@ const dbName = require("./helpers/requireTestDb")();
 console.log(`Database tes: ${dbName}\n`);
 
 const suites = [
+  "test_notification_email.js",
   "test_cart_limits.js",
   "test_cart_schema.js",
   // Paket keamanan & integritas

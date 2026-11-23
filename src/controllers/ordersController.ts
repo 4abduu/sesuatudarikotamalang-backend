@@ -13,6 +13,7 @@ import { createNotification } from "../dal/notifications";
 import { logger } from "../logger";
 import { parsePagination, buildPagination } from "../lib/pagination";
 import { sendAdminNotificationEmail } from "../lib/mailer";
+import { orderItemEmailLines } from "../lib/notificationEmail";
 import { normalizeOrderItems, resolveVariantForProduct, variantLabel } from "../lib/cart";
 import { MAX_ORDER_TOTAL, MAX_QTY_PER_LINE } from "../lib/orderLimits";
 
@@ -347,13 +348,17 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
     sendAdminNotificationEmail({
       subject: `Pesanan baru - ${newOrder.orderNumber}`,
       title: "Pesanan baru masuk",
+      orderId: newOrder.id,
+      footer: "Pesanan baru belum berarti pembayaran lunas. Periksa status terbaru di detail pesanan sebelum menyerahkan barang.",
       lines: [
         { label: "Nomor pesanan", value: newOrder.orderNumber },
-        { label: "Pembeli", value: req.user.email },
+        { label: "Pembeli", value: `${req.user.name} (${req.user.email})` },
         { label: "Total", value: `Rp${newOrder.totalAmount.toLocaleString("id-ID")}` },
         { label: "Jumlah item", value: `${newOrder.items.length} baris / ${newOrder.items.reduce((sum: number, item: any) => sum + item.quantity, 0)} unit` },
-        { label: "Metode pembayaran", value: paymentMethod === "midtrans" ? "Midtrans" : "COD" },
-        { label: "Pickup", value: `${pickupDateStr} ${pickupSlot}` },
+        { label: "Metode pembayaran", value: paymentMethod === "midtrans" ? "Midtrans" : "Bayar di toko (Cash/QRIS)" },
+        { label: "Status saat dibuat", value: "Menunggu pembayaran" },
+        { label: "Pickup", value: `${pickupDateStr} ${pickupSlot} WIB` },
+        ...orderItemEmailLines(newOrder.items),
       ],
     }).catch((emailError) => {
       logger.warn({ err: emailError, orderId: newOrder.id }, "email pesanan baru ke admin gagal");

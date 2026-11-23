@@ -5,7 +5,7 @@ import jwt from "jsonwebtoken";
 import { OAuth2Client } from "google-auth-library";
 import prisma from "../lib/prisma";
 import { validatePassword } from "../lib/validatePassword";
-import { sendOtpEmail } from "../lib/mailer";
+import { sendOtpEmail, sendWelcomeEmail } from "../lib/mailer";
 import { isAllowedAvatarUrl } from "../lib/avatar";
 import { isEmail, isPasswordWithinBcryptLimit, isString } from "../lib/validate";
 import { generateOtp, hashOtp, verifyOtpHash } from "../lib/otp";
@@ -60,6 +60,7 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       expiresIn: "7d",
     });
 
+    void sendWelcomeEmail(user);
     res.status(201).json({
       token,
       user: { id: user.id, name: user.name, email: user.email, role: user.role },
@@ -158,6 +159,7 @@ export const googleLogin = async (req: Request, res: Response, next: NextFunctio
           authProvider: "google",
         },
       });
+      void sendWelcomeEmail(user);
     } else if (user.authProvider === "email") {
       // F-09: Jika sebelumnya daftar via email biasa dan login via Google, set passwordHash = null
       // agar penyerang yang sempat mendaftarkan email korban tidak bisa mengakses akun setelah korban login Google.

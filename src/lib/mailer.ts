@@ -1,5 +1,6 @@
 import { Resend } from "resend";
 import { logger } from "../logger";
+import { NotificationEmail, renderNotificationEmail, welcomeNotification } from "./notificationEmail";
 
 /* ------------------------------------------------------------------ */
 /* Brand tokens (mirror globals.css so email matches the app)         */
@@ -300,11 +301,7 @@ export async function sendOtpEmail(
   return result.data;
 }
 
-export interface AdminNotificationEmail {
-  subject: string;
-  title: string;
-  lines: Array<{ label: string; value: string }>;
-}
+export type AdminNotificationEmail = NotificationEmail;
 
 /**
  * Mengirim email operasional ke alamat notificationEmail pada AppSettings.
@@ -331,17 +328,37 @@ export async function sendAdminNotificationEmail(notification: AdminNotification
 
   const resend = new Resend(apiKey);
   const fromEmail = process.env.RESEND_FROM_EMAIL || "Sesuatu DariKota Malang <onboarding@resend.dev>";
-  const rows = notification.lines
-    .map(({ label, value }) => `<tr><td style="padding:6px 12px 6px 0;color:#6B5D4F">${escapeHtml(label)}</td><td style="padding:6px 0;font-weight:600">${escapeHtml(value)}</td></tr>`)
-    .join("");
 
   const result = await resend.emails.send({
     from: fromEmail,
     to,
     subject: notification.subject,
-    html: `<div style="font-family:Arial,sans-serif;color:#2B211A;max-width:600px"><h2 style="color:#A8452B">${escapeHtml(notification.title)}</h2><table>${rows}</table><p style="color:#6B5D4F">Buka dashboard admin untuk melihat detail lengkap.</p></div>`,
+    ...renderNotificationEmail(notification),
   });
   if (result.error) throw new Error(result.error.message || "Resend gagal mengirim email admin");
 }
 
-export default { sendOtpEmail, sendAdminNotificationEmail };
+/** Best effort: hanya dipanggil setelah akun baru berhasil dibuat, bukan saat login. */
+export async function sendWelcomeEmail(user: { id: string; name: string; email: string }): Promise<void> {
+  try {
+    const apiKey = process.env.RESEND_API_KEY;
+    if (!apiKey) {
+      logger.warn({ userId: user.id }, "RESEND_API_KEY kosong, welcome email dilewati");
+      return;
+    }
+    const notification = welcomeNotification(user.name);
+    const result = await new Resend(apiKey).emails.send({
+      from: process.env.RESEND_FROM_EMAIL || "Sesuatu DariKota Malang <onboarding@resend.dev>",
+      to: user.email,
+      subject: notification.subject,
+      ...renderNotificationEmail(notification),
+    });
+    if (result.error) {
+      logger.warn({ userId: user.id }, "provider menolak welcome email; pendaftaran tetap berhasil");
+    }
+  } catch {
+    logger.warn({ userId: user.id }, "welcome email gagal; pendaftaran tetap berhasil");
+  }
+}
+
+export default { sendOtpEmail, sendAdminNotificationEmail, sendWelcomeEmail };
